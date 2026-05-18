@@ -80,6 +80,14 @@ TOOL_REGISTRY = {
         "evidence_type": "Audit Logging",
         "what_it_proves": "Trail configuration, event types logged, log delivery, multi-region coverage",
     },
+    "aws_config": {
+        "title": "AWS Config",
+        "type": "service",
+        "families": ["cm", "pm", "ra"],
+        "controls": ["cm-2", "cm-3", "cm-8", "ra-5", "sa-10"],
+        "evidence_type": "Asset Discovery & Configuration Inventory",
+        "what_it_proves": "Complete resource inventory, configuration drift detection, unauthorized resource discovery, boundary validation",
+    },
     "github": {
         "title": "GitHub",
         "type": "software",
@@ -96,13 +104,21 @@ TOOL_REGISTRY = {
         "evidence_type": "CI/CD Pipeline Security",
         "what_it_proves": "Security scan gates, build pass/fail history, deployment approvals, flaw remediation",
     },
-    "jenkins": {
-        "title": "Jenkins",
+    "codeql": {
+        "title": "CodeQL (GitHub SAST)",
         "type": "software",
-        "families": ["sa", "cm"],
-        "controls": ["sa-10", "sa-11", "cm-3"],
-        "evidence_type": "CI/CD Pipeline Security",
-        "what_it_proves": "Pipeline build history, security gate enforcement, plugin vulnerability status",
+        "families": ["sa", "si"],
+        "controls": ["sa-11", "si-2", "ra-5"],
+        "evidence_type": "Static Application Security Testing",
+        "what_it_proves": "Code vulnerability findings, security hotspots, CWE mappings, remediation status",
+    },
+    "trivy": {
+        "title": "Trivy (Open Source Scanner)",
+        "type": "software",
+        "families": ["ra", "si", "cm"],
+        "controls": ["ra-5", "si-2", "cm-6", "cm-7"],
+        "evidence_type": "Container, IaC & Dependency Scanning",
+        "what_it_proves": "CVEs in container images, IaC misconfigurations, dependency vulnerabilities, SBOM generation",
     },
     "nvd": {
         "title": "NIST NVD / OSV.dev",
@@ -181,14 +197,14 @@ def detect_status_from_checkboxes(cells):
 
 
 def extract_evidence_method(row_text: str) -> str:
-    """Pull evidence method from the metadata row."""
+    """Pull evidence method from the metadata row. Returns None if not found."""
     text = row_text.lower()
     for method in EVIDENCE_METHODS:
         if f"evidence method:" in text and method in text.split("evidence method:")[1].split("|")[0]:
             return method
         if method in text and "evidence" in text:
             return method
-    return "manual"
+    return None
 
 
 def extract_requirement_text(cell_text: str) -> str:
@@ -203,6 +219,25 @@ def get_tools_for_control(control_id: str) -> list:
     """Return tool keys whose control list includes this control."""
     return [key for key, tool in TOOL_REGISTRY.items()
             if control_id in tool["controls"]]
+
+
+def infer_evidence_method(control_id: str, status: str) -> str:
+    """
+    Infer evidence method from tool coverage when the SSP doesn't specify one.
+    - inherited status → inherited
+    - 2+ tools cover the control → automated
+    - 1 tool covers the control → hybrid (tool + human review)
+    - 0 tools → manual
+    """
+    if status == "inherited":
+        return "inherited"
+    tool_count = len(get_tools_for_control(control_id))
+    if tool_count >= 2:
+        return "automated"
+    elif tool_count == 1:
+        return "hybrid"
+    else:
+        return "manual"
 
 
 def is_missing_or_stale(text, status):
@@ -359,12 +394,15 @@ def parse_control_table(table):
         status = detect_status_from_checkboxes(unique)
 
     # Row 3: Evidence method + origination
-    evidence_method = "manual"
+    evidence_method = None
     if len(rows) > 3:
         # Combine all unique cell texts from the metadata row
         meta_texts = set(c.text for c in rows[3].cells)
         meta_combined = " | ".join(meta_texts)
         evidence_method = extract_evidence_method(meta_combined)
+    # If not found in document, infer from tool coverage
+    if not evidence_method:
+        evidence_method = infer_evidence_method(control_id, status)
 
     # Row 5 (or last row): Implementation narrative
     narrative = ""

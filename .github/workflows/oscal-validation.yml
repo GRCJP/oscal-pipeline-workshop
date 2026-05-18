@@ -1,0 +1,61 @@
+name: OSCAL Validation
+
+on:
+  push:
+    branches: [main]
+    paths: ['oscal/**', 'scripts/**']
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install openpyxl python-docx
+
+      - name: Run Excel converter
+        run: python scripts/excel_to_oscal.py --input Templates/fedramp-moderate-template-ssp.xlsx --output oscal-test
+
+      - name: Validate SSP JSON structure
+        run: |
+          python -c "
+          import json, sys
+          with open('oscal-test/ssp.json') as f:
+              data = json.load(f)
+          ssp = data.get('system-security-plan')
+          assert ssp, 'Missing system-security-plan root'
+          assert ssp.get('uuid'), 'Missing SSP UUID'
+          controls = ssp['control-implementation']['implemented-requirements']
+          print(f'Validated SSP: {len(controls)} controls')
+          assert len(controls) > 0, 'No controls found'
+          "
+
+      - name: Validate Assessment Results skeleton
+        run: |
+          python -c "
+          import json
+          with open('oscal-test/assessment-results.json') as f:
+              data = json.load(f)
+          ar = data.get('assessment-results')
+          assert ar, 'Missing assessment-results root'
+          print('Assessment Results skeleton: valid')
+          "
+
+      - name: Validate POA&M skeleton
+        run: |
+          python -c "
+          import json
+          with open('oscal-test/poam.json') as f:
+              data = json.load(f)
+          poam = data.get('plan-of-action-and-milestones')
+          assert poam, 'Missing POA&M root'
+          print('POA&M skeleton: valid')
+          "

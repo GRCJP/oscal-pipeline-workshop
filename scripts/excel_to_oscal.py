@@ -84,6 +84,14 @@ TOOL_REGISTRY = {
         "evidence_type": "Audit Logging",
         "what_it_proves": "Trail configuration, event types logged, log delivery, multi-region coverage",
     },
+    "aws_config": {
+        "title": "AWS Config",
+        "type": "service",
+        "families": ["cm", "pm", "ra"],
+        "controls": ["cm-2", "cm-3", "cm-8", "ra-5", "sa-10"],
+        "evidence_type": "Asset Discovery & Configuration Inventory",
+        "what_it_proves": "Complete resource inventory, configuration drift detection, unauthorized resource discovery, boundary validation",
+    },
     "github": {
         "title": "GitHub",
         "type": "software",
@@ -100,13 +108,21 @@ TOOL_REGISTRY = {
         "evidence_type": "CI/CD Pipeline Security",
         "what_it_proves": "Security scan gates, build pass/fail history, deployment approvals, flaw remediation",
     },
-    "jenkins": {
-        "title": "Jenkins",
+    "codeql": {
+        "title": "CodeQL (GitHub SAST)",
         "type": "software",
-        "families": ["sa", "cm"],
-        "controls": ["sa-10", "sa-11", "cm-3"],
-        "evidence_type": "CI/CD Pipeline Security",
-        "what_it_proves": "Pipeline build history, security gate enforcement, plugin vulnerability status",
+        "families": ["sa", "si"],
+        "controls": ["sa-11", "si-2", "ra-5"],
+        "evidence_type": "Static Application Security Testing",
+        "what_it_proves": "Code vulnerability findings, security hotspots, CWE mappings, remediation status",
+    },
+    "trivy": {
+        "title": "Trivy (Open Source Scanner)",
+        "type": "software",
+        "families": ["ra", "si", "cm"],
+        "controls": ["ra-5", "si-2", "cm-6", "cm-7"],
+        "evidence_type": "Container, IaC & Dependency Scanning",
+        "what_it_proves": "CVEs in container images, IaC misconfigurations, dependency vulnerabilities, SBOM generation",
     },
     "nvd": {
         "title": "NIST NVD / OSV.dev",
@@ -188,6 +204,25 @@ def get_tools_for_control(control_id: str) -> list:
         if control_id in tool["controls"]:
             tools.append(key)
     return tools
+
+
+def infer_evidence_method(control_id: str, status: str) -> str:
+    """
+    Infer evidence method from tool coverage when the SSP doesn't specify one.
+    - inherited status → inherited
+    - 2+ tools cover the control → automated
+    - 1 tool covers the control → hybrid (tool + human review)
+    - 0 tools → manual
+    """
+    if status == "inherited":
+        return "inherited"
+    tool_count = len(get_tools_for_control(control_id))
+    if tool_count >= 2:
+        return "automated"
+    elif tool_count == 1:
+        return "hybrid"
+    else:
+        return "manual"
 
 
 def is_missing_or_stale(text, status):
@@ -369,7 +404,11 @@ def convert_excel_to_oscal(input_path: str, output_dir: str):
         status = normalize_status(row_data["status"])
         family = control_id.split("-")[0] if "-" in control_id else ""
         ssp_text = row_data["implementation"]
-        evidence_method = (row_data.get("evidence_method") or "Manual").strip().lower()
+        raw_evidence = row_data.get("evidence_method")
+        if raw_evidence and str(raw_evidence).strip():
+            evidence_method = str(raw_evidence).strip().lower()
+        else:
+            evidence_method = infer_evidence_method(control_id, status)
         needs_review, review_reason = is_missing_or_stale(ssp_text, status)
 
         # Stats
