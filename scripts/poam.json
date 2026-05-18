@@ -1,0 +1,15 @@
+{
+  "plan-of-action-and-milestones": {
+    "uuid": "a9b669cd-8363-5975-b031-58dcbd5b66ea",
+    "metadata": {
+      "title": "Workshop Demo — Plan of Action and Milestones",
+      "last-modified": "2026-05-12T03:57:26Z",
+      "version": "1.0.0",
+      "oscal-version": "1.1.2"
+    },
+    "import-ssp": {
+      "href": "ssp.json"
+    },
+    "poam-items": []
+  }
+}
