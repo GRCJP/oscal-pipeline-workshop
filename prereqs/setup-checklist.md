@@ -49,6 +49,8 @@ If you don't have one: https://aws.amazon.com/free/
 
 ### Enable AWS Config
 
+> Make sure you are in **us-east-1** (check the region selector in the top right of the console).
+
 1. Go to **AWS Config** in the console
 2. Click **Get started** or **Settings**
 3. Select **Record all resource types**
@@ -58,14 +60,22 @@ If you don't have one: https://aws.amazon.com/free/
 
 This gives the pipeline a complete inventory of your AWS resources.
 
+**Alternative:** Run the setup script instead (uses admin credentials):
+```bash
+bash scripts/aws-setup.sh
+```
+This creates all AWS resources in us-east-1 automatically.
+
 ### Verify AWS CLI works
+
+> **IMPORTANT:** All workshop resources must be in **us-east-1 (N. Virginia)**. When creating resources in the console or running CLI commands, always confirm you are in us-east-1. Using a different region will cause the pipeline to miss your resources.
 
 ```bash
 brew install awscli   # macOS
 # or: pip3 install awscli
 
 aws configure
-# Enter your Access Key ID, Secret Access Key, and region (us-east-1)
+# Enter your Access Key ID, Secret Access Key, and region: us-east-1
 
 # Test connection:
 aws iam list-users
