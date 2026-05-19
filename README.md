@@ -1,78 +1,95 @@
 # OSCAL Pipeline Workshop
 
-Hands-on workshop: build an OSCAL compliance pipeline with free, open-source tools. Convert FedRAMP SSPs to OSCAL, discover AWS assets, assess security posture, and reconcile findings into POA&M items.
+A hands-on workshop that teaches the methodology behind continuous compliance — not just how to convert an SSP, but how to discover what's actually in your environment, test it against security controls, and maintain that cycle continuously.
 
-## What You'll Build
+## The Problem
 
-A working compliance-as-code pipeline that:
+Organizations don't know what they don't know. The SSP was written months ago. Since then, resources were spun up that nobody documented, tools were decommissioned that nobody removed, and controls claiming "we inventory all components" are already wrong. Traditional assessments rely on manual artifacts, screenshots, and waiting — and they only give you a point-in-time snapshot.
 
-1. **Converts** FedRAMP SSP templates (Excel or Word) into machine-readable OSCAL JSON
-2. **Discovers** what resources actually exist in your AWS environment using AWS Config
-3. **Assesses** security posture with Prowler, Trivy, CodeQL, and NVD vulnerability data
-4. **Reconciles** evidence against SSP claims — anything that doesn't match becomes a POA&M item
+## The Method
 
-The pipeline infers each control's evidence method automatically: if two or more tools in the registry can verify a control, it's **automated**; one tool means **hybrid** (tool evidence plus human review); no tools means **manual**; inherited stays inherited.
+This pipeline treats the SSP as a **hypothesis**, not a source of truth. It proves or disproves it:
 
-## Why This Approach
+1. **Convert** — Read the SSP and extract what it claims. The converter scans narratives for tool and service mentions. No assumptions about what should exist.
+2. **Discover** — Query the actual environment (AWS, GitHub). Build a real inventory. Compare it against what the SSP claims. Flag drift: undocumented resources the SSP missed, and missing resources the SSP claims but don't exist.
+3. **Assess** — Run security checks against what was discovered. Test IAM, S3, CloudTrail, security groups, VPC flow logs, KMS, GitHub branch protection, and more. Evidence method is determined by what the checks actually find, not predicted upfront.
+4. **Reconcile** — Compare SSP claims against evidence. Controls are confirmed, contradicted, or unverified. Gaps become POA&M items. Undocumented resources become POA&M items.
+5. **Enforce** — Gate and alert. The pipeline passes or fails. Findings create GitHub issues automatically.
 
-Stop treating the SSP as a source of truth — treat it as a hypothesis. The pipeline proves or disproves it. Your SSP was written months ago; since then, resources were spun up that nobody documented. Controls claiming "we inventory all components" may already be wrong.
+Run this on a schedule and you have **continuous compliance** — not a quarterly exercise.
 
-**Discovery before assessment.** You can't assess what you haven't discovered. AWS Config gives you the ground truth — every resource in your account. That's your real inventory, not the spreadsheet someone updated last quarter.
+## OSCAL Model Alignment
+
+| OSCAL Model | Pipeline Stage |
+|---|---|
+| Catalog (controls) | Referenced — NIST 800-53 Rev 5 |
+| Profile (baseline) | Referenced — FedRAMP Moderate |
+| Component Definition | Convert extracts SSP-claimed components. Discovery adds what's actually there. |
+| System Security Plan | Convert — the claim |
+| Assessment Results | Assess + Reconcile — the evidence and verdicts |
+| POA&M | Reconcile — the action items |
 
 ## Repository Structure
 
 ```
-├── Templates/                  # FedRAMP SSP templates (Excel & Word)
-├── scripts/
-│   ├── excel_to_oscal.py       # Convert Excel SSP → OSCAL JSON
-│   ├── docx_to_oscal.py        # Convert Word SSP → OSCAL JSON
-│   ├── aws-setup.sh            # Provision demo AWS environment
-│   ├── assessment-results.json # Assessment results artifact
-│   └── poam.json               # POA&M artifact
-├── prereqs/
-│   ├── setup-checklist.md      # Step-by-step setup guide
-│   └── .env.example            # Environment variable template
-├── .github/workflows/
-│   ├── oscal-validation.yml    # CI: validate OSCAL output on push
-│   └── codeql.yml              # SAST scanning via CodeQL
-└── Instructions - Club SOP/    # Session facilitation guide
+scripts/
+  excel_to_oscal.py         # Stage 1: Convert Excel SSP to OSCAL
+  docx_to_oscal.py          # Stage 1: Convert Word SSP to OSCAL
+  discover.py               # Stage 2: Discover AWS + GitHub inventory, drift detection
+  assess.py                 # Stage 3: Run security checks, capture evidence
+  reconcile.py              # Stage 4: Compare claims vs evidence, generate POA&M
+  enforce.py                # Stage 5: Pass/fail gate, GitHub issue alerting
+  run_pipeline.py           # End-to-end runner for all 5 stages
+  pipeline_utils.py         # Shared helpers (keyword matching, screenshots, OSCAL builders)
+  aws-setup.sh              # Provision demo AWS environment with intentional findings
+  inspector_control_map.json # grclanker inspector finding to control mapping
+  config.py                 # Intentional credential finding for scanners
+Templates/                  # FedRAMP SSP templates (Excel & Word)
+terraform/                  # Intentional IaC misconfigs for Trivy scanning
+prereqs/                    # Setup checklist and .env.example
+.github/workflows/          # CI: OSCAL validation, CodeQL, full assessment
 ```
 
 ## Tools Used
 
 | Tool | Purpose | Cost |
 |------|---------|------|
-| Python 3 | Run converter scripts | Free |
+| Python 3 | Run pipeline scripts | Free |
 | AWS CLI + Config | Asset discovery and inventory | Free tier |
-| GitHub + Actions | Source control and CI/CD pipeline | Free |
+| GitHub + Actions | Source control, CI/CD, code scanning | Free |
 | Prowler | Cloud security posture scanning | Free (OSS) |
 | Trivy | Container, IaC, and dependency scanning | Free (OSS) |
 | CodeQL | Static application security testing | Free (on GitHub) |
 | NVD API | Vulnerability intelligence | Free (public) |
 
+The pipeline doesn't care which specific tools you use — it cares about what controls they prove. If your org uses Splunk instead of CloudWatch, or Okta instead of IAM, the pattern is the same.
+
 ## Getting Started
 
-1. **Clone** this repository
-2. **Follow** the [setup checklist](prereqs/setup-checklist.md) (allow 30-45 minutes)
-3. **Run** the converter to verify your setup:
-   ```bash
-   python3 scripts/excel_to_oscal.py \
-     --input Templates/fedramp-moderate-template-ssp.xlsx \
-     --output oscal
-   ```
-   You should see **57 controls** processed and **CONVERSION COMPLETE**.
+See [WORKSHOP-COMMANDS.md](WORKSHOP-COMMANDS.md) for the full command reference.
 
-> **Important:** All AWS resources must be in **us-east-1**. The pipeline won't see resources in other regions.
+Quick start:
 
-## Customization
+```bash
+git clone https://github.com/GRCJP/oscal-pipeline-workshop.git
+cd oscal-pipeline-workshop
+pip3 install -r requirements.txt
+cp prereqs/.env.example .env
+# Edit .env with your AWS and GitHub credentials
+export $(cat .env | grep -v '^#' | xargs)
+```
 
-- **Tool registry:** The converter includes a registry of 8 tools. If your org uses different tools (e.g., Splunk, Azure AD), add them to the registry — describe the tool and what it proves.
-- **SSP format:** The converters auto-detect control table layouts. For non-standard formats, describe your document structure and adjust the parsing logic.
-- **Config section:** The configuration block at the top of each converter is the only part that changes between organizations.
+Run the pipeline stage by stage, or all at once:
+
+```bash
+python3 scripts/run_pipeline.py --github-repo oscal-pipeline-workshop --skip-prowler --skip-trivy --no-issue
+```
+
+> **Important:** All AWS resources must be in **us-east-1**.
 
 ## Context
 
-Tools like [Trestle](https://github.com/oscal-compass/compliance-trestle) and other OSCAL frameworks exist. This workshop helps you understand what's under the hood so you can evaluate, extend, or build on those tools with confidence.
+Tools like [Trestle](https://github.com/oscal-compass/compliance-trestle) and other OSCAL frameworks exist. This workshop helps you understand what's under the hood — the methodology, the process, and the thought behind what we're trying to streamline — so you can evaluate, extend, or build on those tools with confidence.
 
 ## Questions?
 

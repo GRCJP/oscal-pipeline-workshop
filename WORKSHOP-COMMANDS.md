@@ -45,43 +45,46 @@ python3 --version
 
 ## Stage 1: Convert
 
-The SSP becomes machine-readable OSCAL. This is the claim — what the SSP says is true.
+The SSP becomes machine-readable OSCAL. The converter scans narratives for tool mentions — no assumptions about what should exist.
 
 ```bash
 python3 scripts/excel_to_oscal.py --input Templates/fedramp-moderate-template-ssp.xlsx --output oscal
 ```
 
-Expected: 57 controls processed, CONVERSION COMPLETE.
+Expected: 57 controls processed. Components extracted from narratives (e.g., AWS IAM, GitHub, Prowler). Controls without tool mentions show "(none)".
 
 ## Stage 2: Discover
 
-Find out what's actually in your environment. You can't assess what you haven't discovered.
+Find out what's actually in your environment. Compare against what the SSP claims.
 
 ```bash
 python3 scripts/discover.py --ssp oscal/ssp.json --output oscal/inventory.json --github-repo oscal-pipeline-workshop
 ```
 
-Expected: AWS resources (IAM users, S3 buckets, CloudTrail, Config) and GitHub resources (repo, workflows, branch protection status).
+Expected: AWS resources + GitHub resources discovered. Drift detection shows:
+- **Documented** — SSP mentions it AND it exists
+- **Undocumented** — exists but SSP doesn't mention it (blind spot)
+- **Missing** — SSP claims it but it's not found
 
 ## Stage 3: Assess
 
-Run checks against the live environment. Test the SSP's claims with real evidence.
+Run checks against the live environment. Evidence method is determined by what the checks actually find.
 
 ```bash
 python3 scripts/assess.py --ssp oscal/ssp.json --github-repo oscal-pipeline-workshop --skip-prowler --skip-trivy --skip-nvd
 ```
 
-Expected: Pass/fail results for IAM (MFA, access keys), S3 (encryption, public access), CloudTrail (multi-region, log validation), and GitHub (branch protection, code scanning).
+Expected: Pass/fail results for IAM (MFA, access keys), S3 (encryption, public access, TLS), CloudTrail (multi-region, log validation), security groups (open inbound), VPC flow logs, KMS rotation, and GitHub (branch protection, code scanning).
 
 ## Stage 4: Reconcile
 
-Compare what the SSP claims vs what the evidence shows. Gaps become POA&M items.
+Compare what the SSP claims vs what the evidence shows. Gaps and undocumented resources become POA&M items.
 
 ```bash
-python3 scripts/reconcile.py --ssp oscal/ssp.json --results oscal/assessment-results.json --output oscal/poam.json
+python3 scripts/reconcile.py --ssp oscal/ssp.json --results oscal/assessment-results.json --inventory oscal/inventory.json --output oscal/poam.json
 ```
 
-Expected: Controls marked as confirmed, contradicted, or unverified. POA&M items generated for every contradiction and gap.
+Expected: Controls marked as confirmed, contradicted, or unverified. Undocumented resources flagged. POA&M items generated for every contradiction, gap, and undocumented resource.
 
 ## Stage 5: Enforce
 
