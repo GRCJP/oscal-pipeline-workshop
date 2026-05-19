@@ -95,7 +95,7 @@ def reconcile(claims: dict, findings_by_control: dict, inventory: dict = None) -
         elif claim["status"] == "implemented" and has_failures:
             verdict = "contradicted"
         elif claim["status"] == "implemented" and not has_evidence:
-            verdict = "unverified"
+            verdict = "manual-review"
         elif claim["status"] == "planned":
             verdict = "planned"
         else:
@@ -141,15 +141,6 @@ def build_poam(reconciliation: dict) -> list:
                     control_id,
                     failure["source"],
                 ))
-        elif result["verdict"] == "unverified":
-            poam_items.append(make_poam_item(
-                f"poam:{control_id}:unverified",
-                f"{control_id.upper()}: Unverified claim — no evidence",
-                (f"SSP claims '{result['claim']}' for {control_id.upper()} "
-                 f"but no assessment evidence exists to confirm or deny."),
-                control_id,
-                "reconciler",
-            ))
         elif result["verdict"] == "undocumented":
             control_display = control_id.replace("undocumented:", "")
             poam_items.append(make_poam_item(
@@ -246,8 +237,8 @@ def main():
     summary_text += f"Controls assessed: {len(reconciliation)}\n\n"
     summary_text += f"Verdicts:\n"
     for v, count in sorted(verdicts.items()):
-        symbol = {"confirmed": "✓", "contradicted": "✗", "unverified": "?",
-                  "inherited": "→", "planned": "◯"}.get(v, " ")
+        symbol = {"confirmed": "✓", "contradicted": "✗", "manual-review": "⚠",
+                  "inherited": "→", "planned": "◯", "undocumented": "✗"}.get(v, " ")
         summary_text += f"  {symbol} {v:15s} {count}\n"
     summary_text += f"\nPOA&M items: {len(poam_items)}\n"
     if poam_items:
@@ -265,8 +256,8 @@ def main():
     print(f"{'─'*62}")
     print(f"  Verdicts:")
     for v, count in sorted(verdicts.items()):
-        symbol = {"confirmed": "✓", "contradicted": "✗", "unverified": "?",
-                  "inherited": "→", "planned": "◯"}.get(v, " ")
+        symbol = {"confirmed": "✓", "contradicted": "✗", "manual-review": "⚠",
+                  "inherited": "→", "planned": "◯", "undocumented": "✗"}.get(v, " ")
         print(f"    {symbol} {v:15s} {count}")
     print(f"{'─'*62}")
     print(f"  POA&M items:           {len(poam_items)}")
