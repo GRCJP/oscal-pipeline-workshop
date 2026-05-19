@@ -1,29 +1,32 @@
 """
-docx_to_oscal.py — Workshop Edition
+docx_to_oscal.py — Workshop Edition (Discovery-Driven)
 
 Converts a FedRAMP/CUI-style Word SSP into OSCAL JSON.
 Reads control tables from a .docx file and produces the same
 separated OSCAL artifacts as excel_to_oscal.py.
 
+Components are extracted from SSP narratives via keyword matching.
+Discovery fills in the real environment inventory.
+
 SUPPORTED SSP PATTERNS:
-  - CUI template: requirement text → status checkboxes → narrative
-  - FedRAMP hybrid: navy header bar → requirement → status row → narrative
+  - CUI template: requirement text -> status checkboxes -> narrative
+  - FedRAMP hybrid: navy header bar -> requirement -> status row -> narrative
   - Any Word SSP with per-control table blocks (auto-detected)
 
 ARCHITECTURE:
   Same as excel_to_oscal.py:
   - OSCAL skeleton is master. SSP carries the CLAIM.
   - Evidence goes into assessment-results.json (separate artifact).
-  - Ingest scripts write there — not here.
+  - Ingest scripts write there -- not here.
 
 USAGE:
   python docx_to_oscal.py --input ssp.docx --output oscal/
   python docx_to_oscal.py --help
 
 MODELS PRODUCED:
-  Model 5: oscal/ssp.json              — System Security Plan (the claim)
-  Model 7: oscal/assessment-results.json — skeleton (ingest scripts populate)
-  Model 8: oscal/poam.json              — skeleton (reconciler populates)
+  Model 5: oscal/ssp.json              -- System Security Plan (the claim)
+  Model 7: oscal/assessment-results.json -- skeleton (ingest scripts populate)
+  Model 8: oscal/poam.json              -- skeleton (reconciler populates)
 """
 
 import json
@@ -42,101 +45,11 @@ except ImportError:
     print("Run: pip install python-docx")
     sys.exit(1)
 
-
-# ── UUID v5 deterministic identifiers ─────────────────────────────────────────
-# Same namespace as excel_to_oscal.py — identical UUIDs for identical controls.
-
-OSCAL_NAMESPACE = uuid.UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
-
-def stable_uuid(name: str) -> str:
-    return str(uuid.uuid5(OSCAL_NAMESPACE, name))
-
-
-# ── Tool Registry ─────────────────────────────────────────────────────────────
-# Same registry as excel_to_oscal.py. Produces identical by-component slots.
-
-TOOL_REGISTRY = {
-    "aws_iam": {
-        "title": "AWS IAM",
-        "type": "service",
-        "families": ["ac", "ia"],
-        "controls": ["ac-2", "ac-2(1)", "ac-3", "ac-5", "ac-6", "ac-6(1)", "ac-7", "ia-2", "ia-2(1)", "ia-4", "ia-5", "ia-5(1)"],
-        "evidence_type": "Cloud Identity & Access",
-        "what_it_proves": "IAM users, MFA status, access key age, permission boundaries, least privilege, account lockout policies",
-    },
-    "aws_s3": {
-        "title": "AWS S3 & KMS",
-        "type": "service",
-        "families": ["sc", "cp", "au"],
-        "controls": ["sc-28", "sc-7", "sc-8", "sc-12", "sc-13", "cp-9", "au-9"],
-        "evidence_type": "Data Encryption, Storage & Backup",
-        "what_it_proves": "Bucket encryption, public access blocks, versioning, backup config, key management, log protection",
-    },
-    "aws_cloudtrail": {
-        "title": "AWS CloudTrail",
-        "type": "service",
-        "families": ["au"],
-        "controls": ["au-2", "au-3", "au-12"],
-        "evidence_type": "Audit Logging",
-        "what_it_proves": "Trail configuration, event types logged, log delivery, multi-region coverage",
-    },
-    "aws_config": {
-        "title": "AWS Config",
-        "type": "service",
-        "families": ["cm", "pm", "ra"],
-        "controls": ["cm-2", "cm-3", "cm-8", "ra-5", "sa-10"],
-        "evidence_type": "Asset Discovery & Configuration Inventory",
-        "what_it_proves": "Complete resource inventory, configuration drift detection, unauthorized resource discovery, boundary validation",
-    },
-    "github": {
-        "title": "GitHub",
-        "type": "software",
-        "families": ["cm", "sa"],
-        "controls": ["cm-2", "cm-3", "cm-5", "cm-7", "cm-8", "sa-10"],
-        "evidence_type": "Source Control & Change Management",
-        "what_it_proves": "Branch protection, PR approvals, code review, commit audit trail, baseline config in repos",
-    },
-    "github_actions": {
-        "title": "GitHub Actions",
-        "type": "software",
-        "families": ["sa", "cm", "si"],
-        "controls": ["sa-10", "sa-11", "cm-3", "si-2"],
-        "evidence_type": "CI/CD Pipeline Security",
-        "what_it_proves": "Security scan gates, build pass/fail history, deployment approvals, flaw remediation",
-    },
-    "codeql": {
-        "title": "CodeQL (GitHub SAST)",
-        "type": "software",
-        "families": ["sa", "si"],
-        "controls": ["sa-11", "si-2", "ra-5"],
-        "evidence_type": "Static Application Security Testing",
-        "what_it_proves": "Code vulnerability findings, security hotspots, CWE mappings, remediation status",
-    },
-    "trivy": {
-        "title": "Trivy (Open Source Scanner)",
-        "type": "software",
-        "families": ["ra", "si", "cm"],
-        "controls": ["ra-5", "si-2", "cm-6", "cm-7"],
-        "evidence_type": "Container, IaC & Dependency Scanning",
-        "what_it_proves": "CVEs in container images, IaC misconfigurations, dependency vulnerabilities, SBOM generation",
-    },
-    "nvd": {
-        "title": "NIST NVD / OSV.dev",
-        "type": "service",
-        "families": ["ra", "si"],
-        "controls": ["ra-5", "si-2"],
-        "evidence_type": "Vulnerability Intelligence",
-        "what_it_proves": "Known CVEs against dependencies, severity distribution, patch availability",
-    },
-    "prowler": {
-        "title": "Prowler (Open Source CSPM)",
-        "type": "software",
-        "families": ["ac", "au", "cm", "ia", "ra", "sc", "si"],
-        "controls": ["ac-2", "ac-3", "ac-6", "ac-7", "au-2", "au-9", "cm-6", "cm-7", "ia-2", "ia-5", "ra-5", "sc-7", "sc-28", "si-4"],
-        "evidence_type": "Cloud Security Posture Management",
-        "what_it_proves": "CIS benchmark compliance, FedRAMP check results, misconfiguration findings across all AWS services",
-    },
-}
+# Import shared utilities
+sys.path.insert(0, os.path.dirname(__file__))
+from pipeline_utils import (
+    stable_uuid, OSCAL_NAMESPACE, KNOWN_COMPONENTS, extract_components_from_text,
+)
 
 
 # ── Status detection ──────────────────────────────────────────────────────────
@@ -152,13 +65,11 @@ VALID_STATUSES = {
     "n/a":            "not-applicable",
 }
 
-EVIDENCE_METHODS = {"automated", "manual", "hybrid", "inherited"}
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def normalize_control_id(raw_id: str) -> str:
-    """Normalize control IDs: AC-01 → ac-1, AC-2(01) → ac-2(1)"""
+    """Normalize control IDs: AC-01 -> ac-1, AC-2(01) -> ac-2(1)"""
     if not raw_id:
         return None
     s = str(raw_id).strip().lower()
@@ -196,48 +107,12 @@ def detect_status_from_checkboxes(cells):
     return "not-implemented"
 
 
-def extract_evidence_method(row_text: str) -> str:
-    """Pull evidence method from the metadata row. Returns None if not found."""
-    text = row_text.lower()
-    for method in EVIDENCE_METHODS:
-        if f"evidence method:" in text and method in text.split("evidence method:")[1].split("|")[0]:
-            return method
-        if method in text and "evidence" in text:
-            return method
-    return None
-
-
 def extract_requirement_text(cell_text: str) -> str:
     """Strip the 'Requirement:' prefix from the requirement cell."""
     text = cell_text.strip()
     if text.lower().startswith("requirement:"):
         text = text[len("requirement:"):].strip()
     return text
-
-
-def get_tools_for_control(control_id: str) -> list:
-    """Return tool keys whose control list includes this control."""
-    return [key for key, tool in TOOL_REGISTRY.items()
-            if control_id in tool["controls"]]
-
-
-def infer_evidence_method(control_id: str, status: str) -> str:
-    """
-    Infer evidence method from tool coverage when the SSP doesn't specify one.
-    - inherited status → inherited
-    - 2+ tools cover the control → automated
-    - 1 tool covers the control → hybrid (tool + human review)
-    - 0 tools → manual
-    """
-    if status == "inherited":
-        return "inherited"
-    tool_count = len(get_tools_for_control(control_id))
-    if tool_count >= 2:
-        return "automated"
-    elif tool_count == 1:
-        return "hybrid"
-    else:
-        return "manual"
 
 
 def is_missing_or_stale(text, status):
@@ -248,28 +123,35 @@ def is_missing_or_stale(text, status):
     return False, None
 
 
-# ── OSCAL builders (identical to excel_to_oscal.py) ──────────────────────────
+# ── OSCAL builders (discovery-driven) ────────────────────────────────────────
 
-def build_by_components(control_id: str, tool_keys: list) -> list:
-    components = []
-    for tool_key in tool_keys:
-        tool = TOOL_REGISTRY[tool_key]
-        components.append({
-            "component-uuid": stable_uuid(f"component:{tool_key}"),
-            "description": "",
+def build_by_components_from_narrative(narrative: str) -> tuple:
+    """
+    Scan the narrative for mentions of known tools/services.
+    Returns (by_components list, component_keys found).
+    No control mapping — just name recognition.
+    """
+    component_keys = extract_components_from_text(narrative)
+    by_components = []
+    for key in component_keys:
+        comp = KNOWN_COMPONENTS[key]
+        by_components.append({
+            "component-uuid": stable_uuid(f"component:{key}"),
+            "description": comp["title"],
             "implementation-status": {
-                "state": "planned",
-                "remarks": "pending-ingest \u2014 no API evidence yet"
+                "state": "claimed",
+                "remarks": "referenced in SSP narrative"
             },
             "props": [
-                {"name": "tool-key",      "value": tool_key},
-                {"name": "evidence-type", "value": tool["evidence_type"]},
+                {"name": "component-key", "value": key},
+                {"name": "origin",        "value": "ssp-narrative"},
             ]
         })
-    return components
+    return by_components, component_keys
 
 
-def build_component_definitions():
+def build_component_definitions(discovered_keys: set):
+    """Build components section from what was actually found in narratives."""
     components = [
         {
             "uuid": stable_uuid("component:this-system"),
@@ -277,22 +159,20 @@ def build_component_definitions():
             "title": "Workshop Demo System",
             "description": (
                 "A demo system built during the GRC Engineering Club "
-                "OSCAL builder session. Uses AWS free tier, GitHub, "
-                "Jenkins, and NIST NVD as evidence sources."
+                "OSCAL builder session."
             ),
             "status": {"state": "operational"}
         }
     ]
-    for tool_key, tool in TOOL_REGISTRY.items():
+    for key in sorted(discovered_keys):
+        comp = KNOWN_COMPONENTS[key]
         components.append({
-            "uuid": stable_uuid(f"component:{tool_key}"),
-            "type": tool["type"],
-            "title": tool["title"],
-            "description": f"{tool['evidence_type']} \u2014 {tool['what_it_proves']}",
+            "uuid": stable_uuid(f"component:{key}"),
+            "type": comp["type"],
+            "title": comp["title"],
             "props": [
-                {"name": "tool-key",         "value": tool_key},
-                {"name": "evidence-type",     "value": tool["evidence_type"]},
-                {"name": "control-families",  "value": ", ".join(tool["families"]).upper()},
+                {"name": "component-key", "value": key},
+                {"name": "origin",        "value": "ssp-narrative"},
             ],
             "status": {"state": "operational"}
         })
@@ -312,16 +192,18 @@ def build_assessment_results_skeleton(ssp_uuid: str):
             },
             "import-ap": {
                 "href": "#",
-                "remarks": "No formal assessment plan for workshop demo. Controls assessed per CONNECTOR-SPEC.md."
+                "remarks": "Assessment plan is automated \u2014 the pipeline scripts define what's checked and how."
             },
             "results": [
                 {
                     "uuid": stable_uuid("result:workshop-run"),
                     "title": "Workshop Pipeline Run",
-                    "description": "Evidence collected from free tools against FedRAMP Moderate baseline.",
+                    "description": "Evidence collected against FedRAMP Moderate baseline.",
                     "start": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
                     "reviewed-controls": {
-                        "control-selections": [{"include-all": {}}]
+                        "control-selections": [
+                            {"include-all": {}}
+                        ]
                     },
                     "observations": [],
                     "findings": [],
@@ -352,7 +234,7 @@ def build_poam_skeleton(ssp_uuid: str):
 def parse_control_table(table):
     """
     Parse a single control table block from the Word SSP.
-    
+
     Expected structure (CUI/FedRAMP hybrid pattern):
       Row 0: Control ID + Name (header bar)
       Row 1: Requirement text
@@ -360,7 +242,7 @@ def parse_control_table(table):
       Row 3: Evidence Method + Origination
       Row 4: Implementation Description header
       Row 5: Implementation narrative
-    
+
     Returns dict or None if not a control table.
     """
     rows = table.rows
@@ -393,17 +275,6 @@ def parse_control_table(table):
                 unique.append(ct)
         status = detect_status_from_checkboxes(unique)
 
-    # Row 3: Evidence method + origination
-    evidence_method = None
-    if len(rows) > 3:
-        # Combine all unique cell texts from the metadata row
-        meta_texts = set(c.text for c in rows[3].cells)
-        meta_combined = " | ".join(meta_texts)
-        evidence_method = extract_evidence_method(meta_combined)
-    # If not found in document, infer from tool coverage
-    if not evidence_method:
-        evidence_method = infer_evidence_method(control_id, status)
-
     # Row 5 (or last row): Implementation narrative
     narrative = ""
     if len(rows) > 5:
@@ -420,7 +291,6 @@ def parse_control_table(table):
         "control_name": control_name,
         "requirement": requirement,
         "status": status,
-        "evidence_method": evidence_method,
         "narrative": narrative,
     }
 
@@ -430,7 +300,7 @@ def parse_control_table(table):
 def convert_docx_to_oscal(input_path: str, output_dir: str):
     print(f"\n{'='*62}")
     print(f"  Word SSP \u2192 OSCAL Converter")
-    print(f"  Workshop Edition \u2014 8 OSCAL Models")
+    print(f"  Discovery-Driven \u2014 SSP as claim, no assumptions")
     print(f"  Reads FedRAMP/CUI-style .docx control tables")
     print(f"{'='*62}")
     print(f"  Input:      {input_path}")
@@ -445,7 +315,7 @@ def convert_docx_to_oscal(input_path: str, output_dir: str):
         return False
 
     print(f"  Found {len(doc.tables)} tables in document")
-    print(f"  Scanning for control tables...\n")
+    print(f"  Scanning for control tables and extracting components...\n")
 
     # Parse all control tables
     controls = []
@@ -463,11 +333,11 @@ def convert_docx_to_oscal(input_path: str, output_dir: str):
 
     # Build OSCAL
     implemented_requirements = []
+    all_component_keys = set()
     stats = {
         "total": 0, "implemented": 0, "inherited": 0, "planned": 0,
         "not_applicable": 0, "has_narrative": 0, "missing_narrative": 0,
-        "tool_slots_created": 0,
-        "automated": 0, "manual": 0, "hybrid": 0, "inherited_evidence": 0,
+        "controls_with_components": 0, "controls_without_components": 0,
     }
 
     for ctrl in controls:
@@ -475,7 +345,6 @@ def convert_docx_to_oscal(input_path: str, output_dir: str):
         control_id = ctrl["control_id"]
         status = ctrl["status"]
         ssp_text = ctrl["narrative"]
-        evidence_method = ctrl["evidence_method"]
         needs_review, review_reason = is_missing_or_stale(ssp_text, status)
 
         # Stats
@@ -488,20 +357,20 @@ def convert_docx_to_oscal(input_path: str, output_dir: str):
         else:
             stats["missing_narrative"] += 1
 
-        ev_stat_map = {"automated": "automated", "manual": "manual",
-                       "hybrid": "hybrid", "inherited": "inherited_evidence"}
-        if evidence_method in ev_stat_map:
-            stats[ev_stat_map[evidence_method]] += 1
+        # Extract components from narrative
+        by_components, component_keys = build_by_components_from_narrative(ssp_text or "")
+        all_component_keys.update(component_keys)
+
+        if component_keys:
+            stats["controls_with_components"] += 1
+        else:
+            stats["controls_without_components"] += 1
 
         family = control_id.split("-")[0] if "-" in control_id else ""
-        covering_tools = get_tools_for_control(control_id)
-        by_components = build_by_components(control_id, covering_tools)
-        stats["tool_slots_created"] += len(by_components)
 
         props = [
             {"name": "control-origination", "value": status},
             {"name": "control-family",      "value": family.upper()},
-            {"name": "evidence-method",     "value": evidence_method},
             {"name": "last-reconciled",     "value": "never"},
         ]
         if needs_review:
@@ -524,7 +393,8 @@ def convert_docx_to_oscal(input_path: str, output_dir: str):
         }
         implemented_requirements.append(impl_req)
 
-        print(f"  {control_id.upper():10s} {status:18s} {evidence_method:10s} tools: {len(covering_tools):2d}  "
+        comp_display = ", ".join(component_keys) if component_keys else "(none)"
+        print(f"  {control_id.upper():10s} {status:18s} components: {comp_display:30s} "
               f"{'OK' if ssp_text else 'XX'} narrative")
 
     # ── Build the SSP (Model 5) ──────────────────────────────────────────────
@@ -541,8 +411,8 @@ def convert_docx_to_oscal(input_path: str, output_dir: str):
                 "oscal-version": "1.1.2",
                 "remarks": (
                     "Generated by GRC Engineering Club workshop converter (docx_to_oscal.py). "
-                    "FedRAMP Moderate baseline. Source: Word SSP document. "
-                    "SSP carries the CLAIM. Evidence goes to assessment-results.json."
+                    "FedRAMP Moderate baseline. Components extracted from SSP "
+                    "narratives \u2014 discovery fills in the real inventory."
                 ),
             },
             "import-profile": {
@@ -554,8 +424,8 @@ def convert_docx_to_oscal(input_path: str, output_dir: str):
                 "system-name": "GRC Engineering Club Workshop Demo",
                 "description": (
                     "A demonstration system built during the live builder session. "
-                    "Uses AWS free tier, GitHub, Jenkins, and NIST NVD as evidence "
-                    "sources to demonstrate the full OSCAL model stack."
+                    "Components are extracted from SSP narratives. Discovery identifies "
+                    "the actual environment inventory."
                 ),
                 "security-sensitivity-level": "moderate",
                 "system-information": {
@@ -580,7 +450,7 @@ def convert_docx_to_oscal(input_path: str, output_dir: str):
                 },
                 "status": {"state": "operational"},
                 "authorization-boundary": {
-                    "description": "AWS free tier account, GitHub repositories, local Jenkins instance, and NIST NVD public API."
+                    "description": "AWS account, GitHub repositories, and associated security tooling."
                 },
             },
             "system-implementation": {
@@ -592,13 +462,13 @@ def convert_docx_to_oscal(input_path: str, output_dir: str):
                         "description": "GRC Engineering Club member building the demo pipeline."
                     }
                 ],
-                "components": build_component_definitions(),
+                "components": build_component_definitions(all_component_keys),
             },
             "control-implementation": {
                 "description": (
                     "FedRAMP Moderate baseline controls with implementation narratives "
-                    "as documented claims. Each control has by-component slots for every "
-                    "tool in the TOOL_REGISTRY. Evidence is collected in assessment-results.json."
+                    "as documented claims. Components extracted from narratives via "
+                    "keyword matching. Discovery adds the real environment inventory."
                 ),
                 "implemented-requirements": implemented_requirements,
             }
@@ -629,29 +499,25 @@ def convert_docx_to_oscal(input_path: str, output_dir: str):
     print(f"\n{'='*62}")
     print(f"  CONVERSION COMPLETE")
     print(f"{'='*62}")
-    print(f"  Source format:           Word SSP (.docx)")
-    print(f"  OSCAL Model 5 (SSP):     {ssp_file}")
-    print(f"  OSCAL Model 7 (AR):      {ar_file}")
-    print(f"  OSCAL Model 8 (POA&M):   {poam_file}")
+    print(f"  Source format:            Word SSP (.docx)")
+    print(f"  OSCAL SSP:                {ssp_file}")
+    print(f"  Assessment Results:       {ar_file}")
+    print(f"  POA&M:                    {poam_file}")
     print(f"{'─'*62}")
-    print(f"  Total controls:          {stats['total']}")
-    print(f"  Implemented:             {stats['implemented']}")
-    print(f"  Inherited:               {stats.get('inherited', 0)}")
-    print(f"  Narratives present:      {stats['has_narrative']}")
-    print(f"  Missing narratives:      {stats['missing_narrative']}")
+    print(f"  Total controls:           {stats['total']}")
+    print(f"  Implemented:              {stats['implemented']}")
+    print(f"  Inherited:                {stats.get('inherited', 0)}")
+    print(f"  Narratives present:       {stats['has_narrative']}")
+    print(f"  Missing narratives:       {stats['missing_narrative']}")
     print(f"{'─'*62}")
-    print(f"  Evidence methods:")
-    print(f"    Automated:             {stats['automated']}  \u2190 tools verify via API")
-    print(f"    Manual:                {stats['manual']}  \u2190 examiner attestation required")
-    print(f"    Hybrid:                {stats['hybrid']}   \u2190 tool evidence + human review")
-    print(f"    Inherited:             {stats['inherited_evidence']}   \u2190 CSP responsibility")
+    print(f"  Components from SSP:      {len(all_component_keys)}")
+    if all_component_keys:
+        print(f"    {', '.join(KNOWN_COMPONENTS[k]['title'] for k in sorted(all_component_keys))}")
+    print(f"  Controls with components: {stats['controls_with_components']}")
+    print(f"  Controls without:         {stats['controls_without_components']}")
     print(f"{'─'*62}")
-    print(f"  Tool slots created:      {stats['tool_slots_created']}")
-    print(f"  Tools in registry:       {len(TOOL_REGISTRY)}")
-    print(f"{'─'*62}")
-    print(f"  UUID strategy:           v5 deterministic (stable diffs)")
-    print(f"  Architecture:            SSP = claim | AR = evidence | POA&M = action")
-    print(f"  Profile reference:       FedRAMP Moderate (NIST oscal-content)")
+    print(f"  UUID strategy:            v5 deterministic (stable diffs)")
+    print(f"  Architecture:             SSP = claim | Discovery = truth | AR = evidence")
     print(f"{'='*62}")
     print(f"\n  OSCAL output is identical whether source is Excel or Word.")
     print(f"  Same UUIDs, same structure, same downstream pipeline.")
