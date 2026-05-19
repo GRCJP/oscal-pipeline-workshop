@@ -583,7 +583,7 @@ def run_prowler(region: str) -> list:
 
 
 def run_trivy() -> list:
-    """Run Trivy filesystem scan if installed."""
+    """Run Trivy filesystem + IaC scan if installed."""
     print("\n    [Trivy] Checking if installed...")
     try:
         result = subprocess.run(["trivy", "--version"], capture_output=True, text=True)
@@ -594,9 +594,12 @@ def run_trivy() -> list:
         print("      Trivy not found — skipping")
         return []
 
-    print(f"      Running Trivy filesystem scan...")
+    # Get repo root (where the pipeline runs from)
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    print(f"      Running Trivy dependency scan...")
     result = subprocess.run(
-        ["trivy", "fs", "--format", "json", "--scanners", "vuln,misconfig", "."],
+        ["trivy", "fs", "--format", "json", "--scanners", "vuln", repo_root],
         capture_output=True, text=True, timeout=300,
     )
 
@@ -624,6 +627,43 @@ def run_trivy() -> list:
                     })
         except json.JSONDecodeError:
             print("      WARN: Could not parse Trivy output")
+
+    # IaC scan (Terraform misconfigs)
+    terraform_dir = os.path.join(repo_root, "terraform")
+    if os.path.isdir(terraform_dir):
+        print(f"      Running Trivy IaC scan on terraform/...")
+        iac_result = subprocess.run(
+            ["trivy", "config", "--format", "json", terraform_dir],
+            capture_output=True, text=True, timeout=300,
+        )
+        if iac_result.returncode == 0 and iac_result.stdout:
+            try:
+                iac_data = json.loads(iac_result.stdout)
+                # Map IaC finding IDs to OSCAL controls
+                iac_control_map = {
+                    "AWS-0086": "sc-7", "AWS-0087": "sc-7", "AWS-0091": "sc-7",
+                    "AWS-0093": "sc-7", "AWS-0094": "sc-7",
+                    "AWS-0104": "sc-7", "AWS-0107": "sc-7",
+                    "AWS-0132": "sc-28", "AWS-0065": "sc-12",
+                    "AWS-0017": "au-2", "AWS-0089": "au-9",
+                    "AWS-0090": "cp-9", "AWS-0124": "cm-6",
+                }
+                for target in iac_data.get("Results", []):
+                    for mc in target.get("Misconfigurations", []):
+                        mc_id = mc.get("ID", "")
+                        control = iac_control_map.get(mc_id, "cm-6")
+                        severity = mc.get("Severity", "MEDIUM")
+                        if severity in ("HIGH", "CRITICAL"):
+                            findings.append({
+                                "source": "trivy",
+                                "control": control,
+                                "status": "fail",
+                                "title": f"IaC: {mc.get('Title', mc_id)[:60]}",
+                                "description": f"Terraform misconfiguration ({mc_id}): {mc.get('Message', '')}",
+                            })
+                            print(f"      {mc_id} [{severity}] {mc.get('Title', '')[:50]}")
+            except json.JSONDecodeError:
+                print("      WARN: Could not parse Trivy IaC output")
 
     print(f"      Trivy findings: {len(findings)}")
     return findings
