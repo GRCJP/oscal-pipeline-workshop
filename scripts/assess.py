@@ -241,6 +241,151 @@ def check_cloudtrail(region: str) -> list:
     return findings
 
 
+def check_network_and_crypto(region: str) -> list:
+    """Check security groups, VPC flow logs, KMS key rotation, and S3 TLS enforcement."""
+    print("\n    [Network/Crypto] Checking SGs, VPC flow logs, KMS rotation, S3 TLS...")
+    findings = []
+    ec2 = boto3.client("ec2", region_name=region)
+    kms = boto3.client("kms", region_name=region)
+    s3 = boto3.client("s3", region_name=region)
+
+    # 1. Security Groups — open 0.0.0.0/0 inbound rules (SC-7)
+    try:
+        sgs = ec2.describe_security_groups()["SecurityGroups"]
+        for sg in sgs:
+            sg_id = sg["GroupId"]
+            sg_name = sg.get("GroupName", sg_id)
+            has_wide_open = False
+            for rule in sg.get("IpPermissions", []):
+                for ip_range in rule.get("IpRanges", []):
+                    if ip_range.get("CidrIp") == "0.0.0.0/0":
+                        has_wide_open = True
+                        break
+                if has_wide_open:
+                    break
+            if has_wide_open:
+                findings.append({
+                    "source": "aws_iam", "control": "sc-7",
+                    "status": "fail", "title": f"Wide-open inbound: {sg_name}",
+                    "description": f"Security group '{sg_name}' ({sg_id}) has an inbound rule allowing 0.0.0.0/0.",
+                })
+                print(f"      {sg_name}: open 0.0.0.0/0 inbound ✗")
+            else:
+                findings.append({
+                    "source": "aws_iam", "control": "sc-7",
+                    "status": "pass", "title": f"No wide-open inbound: {sg_name}",
+                    "description": f"Security group '{sg_name}' ({sg_id}) has no 0.0.0.0/0 inbound rules.",
+                })
+                print(f"      {sg_name}: no wide-open inbound ✓")
+    except Exception as e:
+        print(f"      WARN: Could not check security groups: {e}")
+
+    # 2. VPC Flow Logs — enabled or not (AU-2, SI-4)
+    try:
+        vpcs = ec2.describe_vpcs()["Vpcs"]
+        for vpc in vpcs:
+            vpc_id = vpc["VpcId"]
+            flow_logs = ec2.describe_flow_logs(
+                Filters=[{"Name": "resource-id", "Values": [vpc_id]}]
+            )["FlowLogs"]
+            if flow_logs:
+                findings.append({
+                    "source": "aws_cloudtrail", "control": "au-2",
+                    "status": "pass", "title": f"Flow logs enabled: {vpc_id}",
+                    "description": f"VPC '{vpc_id}' has flow logs enabled.",
+                })
+                findings.append({
+                    "source": "aws_cloudtrail", "control": "si-4",
+                    "status": "pass", "title": f"Flow logs enabled: {vpc_id}",
+                    "description": f"VPC '{vpc_id}' has flow logs enabled.",
+                })
+                print(f"      {vpc_id}: flow logs enabled ✓")
+            else:
+                findings.append({
+                    "source": "aws_cloudtrail", "control": "au-2",
+                    "status": "fail", "title": f"No flow logs: {vpc_id}",
+                    "description": f"VPC '{vpc_id}' has no flow logs enabled.",
+                })
+                findings.append({
+                    "source": "aws_cloudtrail", "control": "si-4",
+                    "status": "fail", "title": f"No flow logs: {vpc_id}",
+                    "description": f"VPC '{vpc_id}' has no flow logs enabled.",
+                })
+                print(f"      {vpc_id}: no flow logs ✗")
+    except Exception as e:
+        print(f"      WARN: Could not check VPC flow logs: {e}")
+
+    # 3. KMS Key Rotation — auto-rotation enabled (SC-12)
+    try:
+        keys = kms.list_keys()["Keys"]
+        for key in keys:
+            key_id = key["KeyId"]
+            try:
+                key_meta = kms.describe_key(KeyId=key_id)["KeyMetadata"]
+                if key_meta.get("KeyManager") == "AWS":
+                    continue  # Skip AWS-managed keys
+                key_alias = key_id[:12]
+                rotation = kms.get_key_rotation_status(KeyId=key_id)
+                if rotation.get("KeyRotationEnabled", False):
+                    findings.append({
+                        "source": "aws_config", "control": "sc-12",
+                        "status": "pass", "title": f"Key rotation enabled: {key_alias}",
+                        "description": f"KMS key '{key_id}' has automatic rotation enabled.",
+                    })
+                    print(f"      {key_alias}: rotation enabled ✓")
+                else:
+                    findings.append({
+                        "source": "aws_config", "control": "sc-12",
+                        "status": "fail", "title": f"No key rotation: {key_alias}",
+                        "description": f"KMS key '{key_id}' does NOT have automatic rotation enabled.",
+                    })
+                    print(f"      {key_alias}: no rotation ✗")
+            except kms.exceptions.from_response_error("AccessDeniedException") if False else Exception as e:
+                if "AccessDenied" in str(e) or "DisabledException" in str(e):
+                    continue
+                print(f"      WARN: Could not check KMS key {key_id}: {e}")
+    except Exception as e:
+        print(f"      WARN: Could not list KMS keys: {e}")
+
+    # 4. S3 TLS enforcement — bucket policy requires SecureTransport (SC-8)
+    try:
+        buckets = s3.list_buckets()["Buckets"]
+        for bucket in buckets:
+            name = bucket["Name"]
+            if not name.startswith("workshop-"):
+                continue
+            try:
+                policy_str = s3.get_bucket_policy(Bucket=name)["Policy"]
+                if "aws:SecureTransport" in policy_str:
+                    findings.append({
+                        "source": "aws_s3", "control": "sc-8",
+                        "status": "pass", "title": f"TLS enforced: {name}",
+                        "description": f"S3 bucket '{name}' policy requires aws:SecureTransport.",
+                    })
+                    print(f"      {name}: TLS enforced ✓")
+                else:
+                    findings.append({
+                        "source": "aws_s3", "control": "sc-8",
+                        "status": "fail", "title": f"No TLS condition: {name}",
+                        "description": f"S3 bucket '{name}' has a policy but no aws:SecureTransport condition.",
+                    })
+                    print(f"      {name}: no TLS condition ✗")
+            except s3.exceptions.ClientError as e:
+                if "NoSuchBucketPolicy" in str(e):
+                    findings.append({
+                        "source": "aws_s3", "control": "sc-8",
+                        "status": "fail", "title": f"No bucket policy: {name}",
+                        "description": f"S3 bucket '{name}' has no bucket policy — TLS not enforced.",
+                    })
+                    print(f"      {name}: no bucket policy ✗")
+                else:
+                    print(f"      WARN: Could not check bucket policy for {name}: {e}")
+    except Exception as e:
+        print(f"      WARN: Could not check S3 TLS enforcement: {e}")
+
+    return findings
+
+
 def check_github_security(github_repo: str = None) -> list:
     """Check GitHub repo security: branch protection, code scanning."""
     token = os.environ.get("GITHUB_TOKEN")
@@ -600,6 +745,7 @@ def main():
     all_findings.extend(check_iam(args.region))
     all_findings.extend(check_s3(args.region))
     all_findings.extend(check_cloudtrail(args.region))
+    all_findings.extend(check_network_and_crypto(args.region))
 
     # GitHub checks
     all_findings.extend(check_github_security(args.github_repo))
