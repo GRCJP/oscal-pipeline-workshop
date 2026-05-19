@@ -2,11 +2,12 @@
 pipeline_utils.py — Shared constants and helpers for the OSCAL pipeline.
 
 Every pipeline script imports from here instead of duplicating
-OSCAL_NAMESPACE, stable_uuid, TOOL_REGISTRY, and screenshot capture.
+OSCAL_NAMESPACE, stable_uuid, and screenshot capture.
 """
 
 import json
 import os
+import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -24,92 +25,53 @@ def now_filesafe() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
 
 
-# ── Tool Registry ─────────────────────────────────────────────────────────────
-# Mirrors excel_to_oscal.py TOOL_REGISTRY. Single source of truth for the pipeline.
+# ── Known Components (name recognition only) ─────────────────────────────────
+# This is NOT a registry. It does NOT map tools to controls or define what
+# they prove. It just recognizes tool/service names in SSP narratives so the
+# converter can say "the SSP mentions this tool for this control."
+#
+# Discovery finds what's actually in the environment — that's the real inventory.
 
-TOOL_REGISTRY = {
-    "aws_iam": {
-        "title": "AWS IAM",
-        "type": "service",
-        "families": ["ac", "ia"],
-        "controls": ["ac-2", "ac-2(1)", "ac-3", "ac-5", "ac-6", "ac-6(1)", "ac-7",
-                      "ia-2", "ia-2(1)", "ia-4", "ia-5", "ia-5(1)"],
-        "evidence_type": "Cloud Identity & Access",
-    },
-    "aws_s3": {
-        "title": "AWS S3 & KMS",
-        "type": "service",
-        "families": ["sc", "cp", "au"],
-        "controls": ["sc-28", "sc-7", "sc-8", "sc-12", "sc-13", "cp-9", "au-9"],
-        "evidence_type": "Data Encryption, Storage & Backup",
-    },
-    "aws_cloudtrail": {
-        "title": "AWS CloudTrail",
-        "type": "service",
-        "families": ["au"],
-        "controls": ["au-2", "au-3", "au-12"],
-        "evidence_type": "Audit Logging",
-    },
-    "aws_config": {
-        "title": "AWS Config",
-        "type": "service",
-        "families": ["cm", "pm", "ra"],
-        "controls": ["cm-2", "cm-3", "cm-8", "ra-5", "sa-10"],
-        "evidence_type": "Asset Discovery & Configuration Inventory",
-    },
-    "github": {
-        "title": "GitHub",
-        "type": "software",
-        "families": ["ac", "cm", "sa"],
-        "controls": ["ac-2", "ac-3", "ac-5", "ac-6", "cm-2", "cm-3", "cm-5", "cm-7", "cm-8", "sa-10"],
-        "evidence_type": "Source Control & Change Management",
-    },
-    "github_actions": {
-        "title": "GitHub Actions",
-        "type": "software",
-        "families": ["sa", "cm", "si"],
-        "controls": ["sa-10", "sa-11", "cm-3", "si-2"],
-        "evidence_type": "CI/CD Pipeline Security",
-    },
-    "codeql": {
-        "title": "CodeQL (GitHub SAST)",
-        "type": "software",
-        "families": ["sa", "si"],
-        "controls": ["sa-11", "si-2", "ra-5"],
-        "evidence_type": "Static Application Security Testing",
-    },
-    "trivy": {
-        "title": "Trivy (Open Source Scanner)",
-        "type": "software",
-        "families": ["ra", "si", "cm"],
-        "controls": ["ra-5", "si-2", "cm-6", "cm-7"],
-        "evidence_type": "Container, IaC & Dependency Scanning",
-    },
-    "nvd": {
-        "title": "NIST NVD / OSV.dev",
-        "type": "service",
-        "families": ["ra", "si"],
-        "controls": ["ra-5", "si-2"],
-        "evidence_type": "Vulnerability Intelligence",
-    },
-    "prowler": {
-        "title": "Prowler (Open Source CSPM)",
-        "type": "software",
-        "families": ["ac", "au", "cm", "ia", "ra", "sc", "si"],
-        "controls": ["ac-2", "ac-3", "ac-6", "ac-7", "au-2", "au-9", "cm-6", "cm-7",
-                      "ia-2", "ia-5", "ra-5", "sc-7", "sc-28", "si-4"],
-        "evidence_type": "Cloud Security Posture Management",
-    },
+KNOWN_COMPONENTS = {
+    "aws iam":          {"title": "AWS IAM",          "type": "service"},
+    "aws s3":           {"title": "AWS S3",           "type": "service"},
+    "aws kms":          {"title": "AWS KMS",          "type": "service"},
+    "aws cloudtrail":   {"title": "AWS CloudTrail",   "type": "service"},
+    "aws config":       {"title": "AWS Config",       "type": "service"},
+    "aws cloudwatch":   {"title": "AWS CloudWatch",   "type": "service"},
+    "vpc flow logs":    {"title": "VPC Flow Logs",    "type": "service"},
+    "github":           {"title": "GitHub",           "type": "software"},
+    "github actions":   {"title": "GitHub Actions",   "type": "software"},
+    "codeql":           {"title": "CodeQL",           "type": "software"},
+    "trivy":            {"title": "Trivy",            "type": "software"},
+    "prowler":          {"title": "Prowler",          "type": "software"},
+    "jenkins":          {"title": "Jenkins",          "type": "software"},
+    "splunk":           {"title": "Splunk",           "type": "software"},
+    "okta":             {"title": "Okta",             "type": "service"},
+    "azure ad":         {"title": "Azure AD",         "type": "service"},
+    "duo":              {"title": "Duo",              "type": "service"},
 }
 
+# Sort by key length descending so "github actions" matches before "github"
+_SORTED_KEYS = sorted(KNOWN_COMPONENTS.keys(), key=len, reverse=True)
 
-def get_tools_for_control(control_id: str) -> list:
-    """Return tool keys whose control list includes this control."""
-    tools = []
-    for key, tool in TOOL_REGISTRY.items():
-        if control_id in tool["controls"]:
-            tools.append(key)
-    return tools
+
+def extract_components_from_text(text: str) -> list:
+    """
+    Scan text for mentions of known tools/services.
+    Returns list of component keys found (e.g., ["aws iam", "github"]).
+    Name recognition only — no control mapping.
+    """
+    if not text:
+        return []
+    lower = text.lower()
+    found = []
+    for key in _SORTED_KEYS:
+        if key in lower:
+            found.append(key)
+            # Remove matched text to avoid "github actions" also matching "github"
+            lower = lower.replace(key, "")
+    return found
 
 
 # ── Screenshot capture ────────────────────────────────────────────────────────
@@ -122,7 +84,6 @@ def capture_screenshot(text: str, output_path: str) -> str:
     from PIL import Image, ImageDraw, ImageFont
 
     lines = text.split("\n")
-    # Use a monospace font — Pillow's default, or Courier if available
     try:
         font = ImageFont.truetype("Courier", 14)
     except (OSError, IOError):
@@ -131,7 +92,6 @@ def capture_screenshot(text: str, output_path: str) -> str:
         except (OSError, IOError):
             font = ImageFont.load_default()
 
-    # Calculate image size
     char_width = 8
     line_height = 18
     padding = 20
@@ -139,7 +99,6 @@ def capture_screenshot(text: str, output_path: str) -> str:
     img_width = max(max_line_len * char_width + padding * 2, 400)
     img_height = len(lines) * line_height + padding * 2
 
-    # Dark background, light text — looks like a terminal
     img = Image.new("RGB", (img_width, img_height), color=(30, 30, 30))
     draw = ImageDraw.Draw(img)
 
