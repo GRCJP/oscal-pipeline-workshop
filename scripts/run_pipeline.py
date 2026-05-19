@@ -48,6 +48,9 @@ def main():
     parser.add_argument("--no-issue", action="store_true", help="Skip GitHub issue creation")
     parser.add_argument("--repo", default=None, help="GitHub repo for issue creation")
     parser.add_argument("--github-repo", default=None, help="Scope GitHub checks to a single repo")
+    parser.add_argument("--no-report", action="store_true", help="Skip HTML dashboard generation")
+    parser.add_argument("--no-export-ssp", action="store_true", help="Skip updated SSP Excel export")
+    parser.add_argument("--no-export-poam", action="store_true", help="Skip POA&M Excel export")
     args = parser.parse_args()
 
     scripts_dir = os.path.dirname(os.path.abspath(__file__))
@@ -129,6 +132,38 @@ def main():
     # Enforce may exit 1 (findings exist) — that's expected, not a pipeline failure
     run_stage(5, "ENFORCE", enforce_cmd)
 
+    # Stage 6: Report
+    report_artifacts = []
+
+    if not args.no_report:
+        run_stage(6, "REPORT — HTML Dashboard", [
+            python, os.path.join(scripts_dir, "report.py"),
+            "--ssp", os.path.join(args.output_dir, "ssp.json"),
+            "--results", os.path.join(args.output_dir, "assessment-results.json"),
+            "--poam", os.path.join(args.output_dir, "poam.json"),
+            "--inventory", os.path.join(args.output_dir, "inventory.json"),
+            "--output", os.path.join(args.output_dir, "report.html"),
+        ])
+        report_artifacts.append(f"{args.output_dir}/report.html")
+
+    if not args.no_export_ssp:
+        run_stage(6, "REPORT — Updated SSP Export", [
+            python, os.path.join(scripts_dir, "export_ssp.py"),
+            "--ssp", os.path.join(args.output_dir, "ssp.json"),
+            "--results", os.path.join(args.output_dir, "assessment-results.json"),
+            "--template", args.input,
+            "--output", os.path.join(args.output_dir, "updated-ssp.xlsx"),
+        ])
+        report_artifacts.append(f"{args.output_dir}/updated-ssp.xlsx")
+
+    if not args.no_export_poam:
+        run_stage(6, "REPORT — POA&M Export", [
+            python, os.path.join(scripts_dir, "export_poam.py"),
+            "--poam", os.path.join(args.output_dir, "poam.json"),
+            "--output", os.path.join(args.output_dir, "poam-report.xlsx"),
+        ])
+        report_artifacts.append(f"{args.output_dir}/poam-report.xlsx")
+
     end_time = datetime.now(timezone.utc)
     elapsed = (end_time - start_time).total_seconds()
 
@@ -140,6 +175,8 @@ def main():
     print(f"    {args.output_dir}/inventory.json")
     print(f"    {args.output_dir}/assessment-results.json")
     print(f"    {args.output_dir}/poam.json")
+    for a in report_artifacts:
+        print(f"    {a}")
     print(f"    {args.evidence_dir}/screenshots/")
     print(f"{'═'*62}\n")
 
