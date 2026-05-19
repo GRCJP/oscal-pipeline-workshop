@@ -32,7 +32,7 @@ except ImportError:
 sys.path.insert(0, os.path.dirname(__file__))
 from pipeline_utils import (
     stable_uuid, now_iso, load_oscal, save_oscal,
-    capture_screenshot, TOOL_REGISTRY,
+    capture_screenshot,
 )
 
 
@@ -176,41 +176,86 @@ def discover_github(github_repo: str = None) -> list:
     return resources
 
 
-def extract_ssp_components(ssp: dict) -> list:
-    """Extract component names declared in the SSP."""
-    components = []
+def extract_ssp_components(ssp: dict) -> dict:
+    """Extract components declared in the SSP, grouped by origin."""
+    components = {}
     sys_impl = ssp.get("system-security-plan", {}).get("system-implementation", {})
     for comp in sys_impl.get("components", []):
-        components.append({
-            "title": comp.get("title", ""),
-            "type": comp.get("type", ""),
+        if comp.get("type") == "this-system":
+            continue
+        title = comp.get("title", "")
+        origin = "unknown"
+        key = title.lower()
+        for p in comp.get("props", []):
+            if p["name"] == "origin":
+                origin = p["value"]
+            if p["name"] == "component-key":
+                key = p["value"]
+        components[key] = {
+            "title": title,
+            "origin": origin,
             "uuid": comp.get("uuid", ""),
-        })
+        }
     return components
 
 
-def detect_drift(discovered: list, ssp_components: list) -> dict:
-    """Compare discovered resources against SSP-declared components."""
-    ssp_titles = {c["title"].lower() for c in ssp_components}
+def detect_drift(discovered: list, ssp_components: dict) -> dict:
+    """
+    Compare discovered resources against SSP-declared components.
+    Real drift detection:
+      - documented: in SSP AND in environment
+      - undocumented: in environment but NOT in SSP
+      - missing: in SSP but NOT in environment
+    """
+    discovered_services = set()
+    for r in discovered:
+        rtype = r.get("type", "")
+        if "IAM" in rtype:
+            discovered_services.add("aws iam")
+        elif "S3" in rtype:
+            discovered_services.add("aws s3")
+        elif "CloudTrail" in rtype:
+            discovered_services.add("aws cloudtrail")
+        elif "Config" in rtype:
+            discovered_services.add("aws config")
+        elif "KMS" in rtype or "Key" in rtype:
+            discovered_services.add("aws kms")
+        elif "SecurityGroup" in rtype:
+            discovered_services.add("aws security groups")
+        elif "VPC" in rtype:
+            discovered_services.add("aws vpc")
+        elif "EC2" in rtype:
+            discovered_services.add("aws ec2")
+        elif "Repository" in rtype:
+            discovered_services.add("github")
+        elif "ActionsWorkflow" in rtype:
+            discovered_services.add("github actions")
+        elif "BranchProtection" in rtype:
+            discovered_services.add("github")
 
-    # Map discovered resource sources to SSP component titles
-    source_to_ssp = {
-        "aws_config": ["aws iam", "aws s3 & kms", "aws cloudtrail", "aws config"],
-        "github": ["github"],
-        "github_actions": ["github actions"],
-    }
+    ssp_keys = set(ssp_components.keys())
 
+    documented = []
     undocumented = []
-    for resource in discovered:
-        source = resource.get("source", "")
-        expected_titles = source_to_ssp.get(source, [])
-        if not any(t in ssp_titles for t in expected_titles):
-            undocumented.append(resource)
+    missing = []
+
+    for svc in sorted(discovered_services):
+        if svc in ssp_keys:
+            documented.append(svc)
+        else:
+            undocumented.append(svc)
+
+    for key in sorted(ssp_keys):
+        if key not in discovered_services:
+            missing.append(key)
 
     return {
         "total_discovered": len(discovered),
+        "discovered_services": sorted(discovered_services),
         "ssp_components": len(ssp_components),
+        "documented": documented,
         "undocumented": undocumented,
+        "missing": missing,
     }
 
 
@@ -241,11 +286,9 @@ def build_inventory(discovered: list, drift: dict) -> dict:
             "drift-summary": {
                 "total-discovered": drift["total_discovered"],
                 "ssp-components": drift["ssp_components"],
-                "undocumented-count": len(drift["undocumented"]),
-                "undocumented": [
-                    {"type": r["type"], "id": r["id"], "name": r["name"]}
-                    for r in drift["undocumented"]
-                ],
+                "documented": drift["documented"],
+                "undocumented": drift["undocumented"],
+                "missing": drift["missing"],
             },
         }
     }
@@ -304,11 +347,18 @@ def main():
     print(f"    AWS:                 {len(aws_resources)}")
     print(f"    GitHub:              {len(github_resources)}")
     print(f"  SSP components:        {len(ssp_components)}")
-    print(f"  Undocumented:          {len(drift['undocumented'])}")
-    if drift["undocumented"]:
-        print(f"\n  Undocumented resources (not in SSP):")
-        for r in drift["undocumented"]:
-            print(f"    ✗ {r['type']:40s} {r['name']}")
+    print(f"{'─'*62}")
+    print(f"  DRIFT DETECTION")
+    print(f"{'─'*62}")
+    print(f"  Documented (SSP + env):    {len(drift['documented'])}")
+    for s in drift["documented"]:
+        print(f"    ✓ {s}")
+    print(f"  Undocumented (env only):   {len(drift['undocumented'])}")
+    for s in drift["undocumented"]:
+        print(f"    ✗ {s}")
+    print(f"  Missing (SSP only):        {len(drift['missing'])}")
+    for s in drift["missing"]:
+        print(f"    ? {s}")
     print(f"\n  Output: {args.output}")
     print(f"{'='*62}\n")
 
