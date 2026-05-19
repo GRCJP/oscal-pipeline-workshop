@@ -79,7 +79,7 @@ def discover_aws(region: str = "us-east-1") -> list:
     return resources
 
 
-def discover_github() -> list:
+def discover_github(github_repo: str = None) -> list:
     """Query GitHub API for repos, branch protection, workflows."""
     token = os.environ.get("GITHUB_TOKEN")
     org = os.environ.get("GITHUB_ORG")
@@ -88,20 +88,32 @@ def discover_github() -> list:
         print("    WARN: GITHUB_TOKEN or GITHUB_ORG not set — skipping GitHub discovery")
         return []
 
-    print(f"\n    Querying GitHub for org/user: {org}...")
-
     import requests
     headers = {"Authorization": f"token {token}", "Accept": "application/vnd.github.v3+json"}
     resources = []
 
-    # List repos
-    resp = requests.get(f"https://api.github.com/users/{org}/repos?per_page=100", headers=headers)
-    if resp.status_code != 200:
-        # Try org endpoint
-        resp = requests.get(f"https://api.github.com/orgs/{org}/repos?per_page=100", headers=headers)
-
-    if resp.status_code == 200:
+    # Scope to a single repo or scan all
+    if github_repo:
+        # Single repo mode — e.g. "oscal-pipeline-workshop"
+        full_name = f"{org}/{github_repo}" if "/" not in github_repo else github_repo
+        print(f"\n    Querying GitHub repo: {full_name}...")
+        resp = requests.get(f"https://api.github.com/repos/{full_name}", headers=headers)
+        if resp.status_code == 200:
+            repos = [resp.json()]
+        else:
+            print(f"      WARN: Could not fetch repo {full_name}: {resp.status_code}")
+            return []
+    else:
+        print(f"\n    Querying GitHub for org/user: {org}...")
+        resp = requests.get(f"https://api.github.com/users/{org}/repos?per_page=100", headers=headers)
+        if resp.status_code != 200:
+            resp = requests.get(f"https://api.github.com/orgs/{org}/repos?per_page=100", headers=headers)
+        if resp.status_code != 200:
+            print(f"      WARN: Could not list repos: {resp.status_code}")
+            return []
         repos = resp.json()
+
+    if repos:
         for repo in repos:
             resources.append({
                 "type": "GitHub::Repository",
@@ -245,6 +257,7 @@ def main():
     parser.add_argument("--output", default="oscal/inventory.json", help="Output inventory path")
     parser.add_argument("--region", default="us-east-1", help="AWS region")
     parser.add_argument("--screenshots", default="evidence/screenshots", help="Screenshot output dir")
+    parser.add_argument("--github-repo", default=None, help="Scope to a single GitHub repo (e.g. oscal-pipeline-workshop)")
     args = parser.parse_args()
 
     print(f"\n{'='*62}")
@@ -260,7 +273,7 @@ def main():
 
     # Discover
     aws_resources = discover_aws(args.region)
-    github_resources = discover_github()
+    github_resources = discover_github(args.github_repo)
     all_resources = aws_resources + github_resources
 
     # Capture discovery output as screenshot

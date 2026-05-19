@@ -241,7 +241,7 @@ def check_cloudtrail(region: str) -> list:
     return findings
 
 
-def check_github_security() -> list:
+def check_github_security(github_repo: str = None) -> list:
     """Check GitHub repo security: branch protection, code scanning."""
     token = os.environ.get("GITHUB_TOKEN")
     org = os.environ.get("GITHUB_ORG")
@@ -249,18 +249,26 @@ def check_github_security() -> list:
         print("\n    [GitHub] WARN: GITHUB_TOKEN or GITHUB_ORG not set — skipping")
         return []
 
-    print(f"\n    [GitHub] Checking repos for {org}...")
     headers = {"Authorization": f"token {token}", "Accept": "application/vnd.github.v3+json"}
     findings = []
 
-    resp = requests.get(f"https://api.github.com/users/{org}/repos?per_page=100", headers=headers)
-    if resp.status_code != 200:
-        resp = requests.get(f"https://api.github.com/orgs/{org}/repos?per_page=100", headers=headers)
-    if resp.status_code != 200:
-        print(f"      WARN: Could not list repos: {resp.status_code}")
-        return []
-
-    repos = resp.json()
+    if github_repo:
+        full_name = f"{org}/{github_repo}" if "/" not in github_repo else github_repo
+        print(f"\n    [GitHub] Checking repo: {full_name}...")
+        resp = requests.get(f"https://api.github.com/repos/{full_name}", headers=headers)
+        if resp.status_code != 200:
+            print(f"      WARN: Could not fetch repo {full_name}: {resp.status_code}")
+            return []
+        repos = [resp.json()]
+    else:
+        print(f"\n    [GitHub] Checking repos for {org}...")
+        resp = requests.get(f"https://api.github.com/users/{org}/repos?per_page=100", headers=headers)
+        if resp.status_code != 200:
+            resp = requests.get(f"https://api.github.com/orgs/{org}/repos?per_page=100", headers=headers)
+        if resp.status_code != 200:
+            print(f"      WARN: Could not list repos: {resp.status_code}")
+            return []
+        repos = resp.json()
     for repo in repos:
         name = repo["full_name"]
         default_branch = repo.get("default_branch", "main")
@@ -578,6 +586,7 @@ def main():
     parser.add_argument("--skip-prowler", action="store_true", help="Skip Prowler scan")
     parser.add_argument("--skip-trivy", action="store_true", help="Skip Trivy scan")
     parser.add_argument("--skip-nvd", action="store_true", help="Skip NVD lookup")
+    parser.add_argument("--github-repo", default=None, help="Scope to a single GitHub repo (e.g. oscal-pipeline-workshop)")
     args = parser.parse_args()
 
     print(f"\n{'='*62}")
@@ -593,7 +602,7 @@ def main():
     all_findings.extend(check_cloudtrail(args.region))
 
     # GitHub checks
-    all_findings.extend(check_github_security())
+    all_findings.extend(check_github_security(args.github_repo))
 
     # Optional tool checks
     if not args.skip_prowler:

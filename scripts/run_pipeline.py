@@ -47,6 +47,7 @@ def main():
     parser.add_argument("--skip-nvd", action="store_true", help="Skip NVD lookup")
     parser.add_argument("--no-issue", action="store_true", help="Skip GitHub issue creation")
     parser.add_argument("--repo", default=None, help="GitHub repo for issue creation")
+    parser.add_argument("--github-repo", default=None, help="Scope GitHub checks to a single repo")
     args = parser.parse_args()
 
     scripts_dir = os.path.dirname(os.path.abspath(__file__))
@@ -70,12 +71,15 @@ def main():
         sys.exit(1)
 
     # Stage 2: Discover
-    ok = run_stage(2, "DISCOVER", [
+    discover_cmd = [
         python, os.path.join(scripts_dir, "discover.py"),
         "--ssp", os.path.join(args.output_dir, "ssp.json"),
         "--output", os.path.join(args.output_dir, "inventory.json"),
         "--region", args.region,
-    ])
+    ]
+    if args.github_repo:
+        discover_cmd.extend(["--github-repo", args.github_repo])
+    ok = run_stage(2, "DISCOVER", discover_cmd)
     if not ok:
         sys.exit(1)
 
@@ -93,6 +97,8 @@ def main():
         assess_cmd.append("--skip-trivy")
     if args.skip_nvd:
         assess_cmd.append("--skip-nvd")
+    if args.github_repo:
+        assess_cmd.extend(["--github-repo", args.github_repo])
 
     ok = run_stage(3, "ASSESS", assess_cmd)
     if not ok:
