@@ -88,7 +88,7 @@ python3 scripts/discover.py --ssp oscal/ssp.json --output oscal/inventory.json -
 
 ### Stage 3: Assess
 ```bash
-python3 scripts/assess.py --ssp oscal/ssp.json --github-repo oscal-pipeline-workshop --skip-prowler --skip-nvd
+python3 scripts/assess.py --ssp oscal/ssp.json --github-repo oscal-pipeline-workshop
 ```
 **Talk about:** Now we test. Not with screenshots and manual checks — with API calls. Every finding has a source, a control, and a status. The evidence method is determined by what actually ran, not predicted upfront.
 
@@ -122,7 +122,7 @@ python3 scripts/export_to_linear.py
 
 ### Full Pipeline
 ```bash
-python3 scripts/run_pipeline.py --github-repo oscal-pipeline-workshop --skip-prowler --skip-nvd --no-issue
+python3 scripts/run_pipeline.py --github-repo oscal-pipeline-workshop --no-issue
 ```
 **Talk about:** Everything we just did, one command. 12 seconds. This runs on a schedule. That's continuous compliance.
 

@@ -71,10 +71,10 @@ Expected: AWS resources + GitHub resources discovered. Drift detection shows:
 Run checks against the live environment. Evidence method is determined by what the checks actually find.
 
 ```bash
-python3 scripts/assess.py --ssp oscal/ssp.json --github-repo oscal-pipeline-workshop --skip-prowler --skip-trivy --skip-nvd
+python3 scripts/assess.py --ssp oscal/ssp.json --github-repo oscal-pipeline-workshop
 ```
 
-Expected: Pass/fail results for IAM (MFA, access keys), S3 (encryption, public access, TLS), CloudTrail (multi-region, log validation), security groups (open inbound), VPC flow logs, KMS rotation, and GitHub (branch protection, code scanning).
+Expected: Pass/fail results for IAM, S3, CloudTrail, security groups, VPC flow logs, KMS rotation, GitHub, Prowler cloud posture, Trivy dependency/IaC scanning, NVD vulnerability lookup, and deep inspector checks.
 
 ## Stage 4: Reconcile
 
@@ -101,7 +101,7 @@ Expected: FAIL with a list of POA&M items and exit code 1.
 After walking through each stage individually, run the full pipeline to see it all together:
 
 ```bash
-python3 scripts/run_pipeline.py --github-repo oscal-pipeline-workshop --skip-prowler --skip-trivy --no-issue
+python3 scripts/run_pipeline.py --github-repo oscal-pipeline-workshop --no-issue
 ```
 
 ## Troubleshooting
