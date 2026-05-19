@@ -60,8 +60,8 @@ TOOL_REGISTRY = {
     "github": {
         "title": "GitHub",
         "type": "software",
-        "families": ["cm", "sa"],
-        "controls": ["cm-2", "cm-3", "cm-5", "cm-7", "cm-8", "sa-10"],
+        "families": ["ac", "cm", "sa"],
+        "controls": ["ac-2", "ac-3", "ac-5", "ac-6", "cm-2", "cm-3", "cm-5", "cm-7", "cm-8", "sa-10"],
         "evidence_type": "Source Control & Change Management",
     },
     "github_actions": {

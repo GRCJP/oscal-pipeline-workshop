@@ -95,10 +95,10 @@ TOOL_REGISTRY = {
     "github": {
         "title": "GitHub",
         "type": "software",
-        "families": ["cm", "sa"],
-        "controls": ["cm-2", "cm-3", "cm-5", "cm-7", "cm-8", "sa-10"],
+        "families": ["ac", "cm", "sa"],
+        "controls": ["ac-2", "ac-3", "ac-5", "ac-6", "cm-2", "cm-3", "cm-5", "cm-7", "cm-8", "sa-10"],
         "evidence_type": "Source Control & Change Management",
-        "what_it_proves": "Branch protection, PR approvals, code review, commit audit trail, baseline config in repos",
+        "what_it_proves": "Org membership, repo access controls, team permissions, branch protection, PR approvals, code review, commit audit trail, baseline config in repos",
     },
     "github_actions": {
         "title": "GitHub Actions",
@@ -244,7 +244,7 @@ def build_by_components(control_id: str, tool_keys: list) -> list:
         tool = TOOL_REGISTRY[tool_key]
         components.append({
             "component-uuid": stable_uuid(f"component:{tool_key}"),
-            "description": "",
+            "description": f"{tool['title']} — {tool['what_it_proves']}",
             "implementation-status": {
                 "state": "planned",
                 "remarks": "pending-ingest — no API evidence yet"
