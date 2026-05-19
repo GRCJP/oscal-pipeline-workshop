@@ -730,6 +730,7 @@ def main():
     parser.add_argument("--skip-prowler", action="store_true", help="Skip Prowler scan")
     parser.add_argument("--skip-trivy", action="store_true", help="Skip Trivy scan")
     parser.add_argument("--skip-nvd", action="store_true", help="Skip NVD lookup")
+    parser.add_argument("--skip-inspectors", action="store_true", help="Skip deep inspector checks")
     parser.add_argument("--github-repo", default=None, help="Scope to a single GitHub repo (e.g. oscal-pipeline-workshop)")
     args = parser.parse_args()
 
@@ -757,7 +758,43 @@ def main():
     if not args.skip_nvd:
         all_findings.extend(check_nvd("oscal/inventory.json"))
 
-    # Import grclanker inspector findings
+    # Run deep inspectors (produces evidence/*.json, then import them)
+    if not args.skip_inspectors:
+        print("\n    [Inspectors] Running deep compliance checks...")
+        inspectors_dir = os.path.join(os.path.dirname(__file__), "inspectors")
+
+        # AWS Inspector
+        try:
+            aws_result = subprocess.run(
+                [sys.executable, os.path.join(inspectors_dir, "aws_inspector.py"),
+                 "--region", args.region,
+                 "--output", os.path.join(args.evidence, "aws-inspector-findings.json")],
+                capture_output=True, text=True, timeout=120,
+            )
+            if aws_result.returncode == 0:
+                print("      AWS Inspector: complete")
+            else:
+                print(f"      AWS Inspector: failed (exit {aws_result.returncode})")
+        except Exception as e:
+            print(f"      AWS Inspector: error — {e}")
+
+        # GitHub Inspector
+        try:
+            gh_cmd = [
+                sys.executable, os.path.join(inspectors_dir, "github_inspector.py"),
+                "--output", os.path.join(args.evidence, "github-inspector-findings.json"),
+            ]
+            if args.github_repo:
+                gh_cmd.extend(["--repo", args.github_repo])
+            gh_result = subprocess.run(gh_cmd, capture_output=True, text=True, timeout=120)
+            if gh_result.returncode == 0:
+                print("      GitHub Inspector: complete")
+            else:
+                print(f"      GitHub Inspector: failed (exit {gh_result.returncode})")
+        except Exception as e:
+            print(f"      GitHub Inspector: error — {e}")
+
+    # Import inspector findings (from files produced above or pre-existing)
     all_findings.extend(import_inspector_findings(args.evidence))
 
     # Build OSCAL assessment results

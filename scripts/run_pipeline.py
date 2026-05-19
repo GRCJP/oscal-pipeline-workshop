@@ -45,6 +45,7 @@ def main():
     parser.add_argument("--skip-prowler", action="store_true", help="Skip Prowler scan")
     parser.add_argument("--skip-trivy", action="store_true", help="Skip Trivy scan")
     parser.add_argument("--skip-nvd", action="store_true", help="Skip NVD lookup")
+    parser.add_argument("--skip-inspectors", action="store_true", help="Skip deep inspector checks")
     parser.add_argument("--no-issue", action="store_true", help="Skip GitHub issue creation")
     parser.add_argument("--repo", default=None, help="GitHub repo for issue creation")
     parser.add_argument("--github-repo", default=None, help="Scope GitHub checks to a single repo")
@@ -100,6 +101,8 @@ def main():
         assess_cmd.append("--skip-trivy")
     if args.skip_nvd:
         assess_cmd.append("--skip-nvd")
+    if args.skip_inspectors:
+        assess_cmd.append("--skip-inspectors")
     if args.github_repo:
         assess_cmd.extend(["--github-repo", args.github_repo])
 
