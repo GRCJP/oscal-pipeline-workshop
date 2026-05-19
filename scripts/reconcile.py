@@ -110,6 +110,20 @@ def reconcile(claims: dict, findings_by_control: dict, inventory: dict = None) -
             "sources": list(set(f["source"] for f in control_findings)),
         }
 
+    # Flag undocumented resources from inventory
+    if inventory:
+        drift = inventory.get("inventory", {}).get("drift-summary", {})
+        for item in drift.get("undocumented", []):
+            name = item if isinstance(item, str) else item.get("name", str(item))
+            results[f"undocumented:{name}"] = {
+                "claim": "not-documented",
+                "verdict": "undocumented",
+                "evidence_count": 0,
+                "failures": [],
+                "passes": [],
+                "sources": ["discovery"],
+            }
+
     return results
 
 
@@ -135,6 +149,16 @@ def build_poam(reconciliation: dict) -> list:
                  f"but no assessment evidence exists to confirm or deny."),
                 control_id,
                 "reconciler",
+            ))
+        elif result["verdict"] == "undocumented":
+            control_display = control_id.replace("undocumented:", "")
+            poam_items.append(make_poam_item(
+                f"poam:{control_id}:undocumented",
+                f"Undocumented resource: {control_display}",
+                (f"Resource '{control_display}' exists in the environment but is not "
+                 f"documented in the SSP. It may affect security controls."),
+                control_id,
+                "discovery",
             ))
 
     return poam_items
