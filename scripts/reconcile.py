@@ -152,7 +152,15 @@ def build_poam(reconciliation: dict) -> list:
                 "discovery",
             ))
 
-    return poam_items
+    # Deduplicate by title — inspector and basic checks may flag the same issue
+    seen_titles = set()
+    deduped = []
+    for item in poam_items:
+        if item["title"] not in seen_titles:
+            seen_titles.add(item["title"])
+            deduped.append(item)
+
+    return deduped
 
 
 def main():
