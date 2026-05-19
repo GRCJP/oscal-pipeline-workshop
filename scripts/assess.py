@@ -35,7 +35,6 @@ sys.path.insert(0, os.path.dirname(__file__))
 from pipeline_utils import (
     stable_uuid, now_iso, now_filesafe, load_oscal, save_oscal,
     capture_screenshot, make_observation, make_finding,
-    TOOL_REGISTRY,
 )
 
 
@@ -826,6 +825,27 @@ def main():
             pass_count += 1
         else:
             fail_count += 1
+
+    # Determine evidence method per control from actual results
+    control_sources = {}
+    for f in all_findings:
+        ctrl = f["control"]
+        src = f["source"]
+        if ctrl not in control_sources:
+            control_sources[ctrl] = set()
+        control_sources[ctrl].add(src)
+
+    # Add evidence-method to each finding based on source count
+    for finding in result["findings"]:
+        ctrl = finding.get("target", {}).get("target-id", "")
+        sources = control_sources.get(ctrl, set())
+        if len(sources) >= 2:
+            method = "automated"
+        elif len(sources) == 1:
+            method = "hybrid"
+        else:
+            method = "manual"
+        finding["props"].append({"name": "evidence-method", "value": method})
 
     ar["assessment-results"]["metadata"]["last-modified"] = now_iso()
 
