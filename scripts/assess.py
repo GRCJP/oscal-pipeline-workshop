@@ -335,52 +335,89 @@ def check_github_security() -> list:
 def run_prowler(region: str) -> list:
     """Run Prowler if installed, parse JSON output."""
     print("\n    [Prowler] Checking if installed...")
+
+    # Try CLI first, then python -m prowler (pip install without PATH)
+    prowler_cmd = None
     try:
         result = subprocess.run(["prowler", "--version"], capture_output=True, text=True)
-        if result.returncode != 0:
-            print("      Prowler not found — skipping")
-            return []
+        if result.returncode == 0:
+            prowler_cmd = ["prowler"]
     except FileNotFoundError:
+        pass
+
+    if not prowler_cmd:
+        try:
+            result = subprocess.run(
+                [sys.executable, "-m", "prowler", "--version"],
+                capture_output=True, text=True,
+            )
+            if result.returncode == 0:
+                prowler_cmd = [sys.executable, "-m", "prowler"]
+        except Exception:
+            pass
+
+    if not prowler_cmd:
         print("      Prowler not found — skipping")
         return []
 
-    print(f"      Running Prowler (this may take a few minutes)...")
+    print(f"      Found Prowler: {' '.join(prowler_cmd)}")
+    # Scope to workshop services only
+    prowler_services = "iam s3 cloudtrail configservice"
+    print(f"      Running Prowler (scoped to: {prowler_services})...")
     prowler_output = Path("evidence/prowler-output")
     prowler_output.mkdir(parents=True, exist_ok=True)
 
     result = subprocess.run(
-        ["prowler", "aws", "--region", region, "--output-formats", "json",
-         "--output-directory", str(prowler_output), "--no-banner"],
+        prowler_cmd + ["aws", "--region", region, "-s", *prowler_services.split(),
+         "-M", "json", "--output-directory", str(prowler_output), "--no-banner"],
         capture_output=True, text=True, timeout=600,
     )
 
     findings = []
-    # Find the JSON output file
-    json_files = list(prowler_output.glob("*.json"))
+    # Find the JSON output file — Prowler 3.x writes a JSON array
+    json_files = sorted(prowler_output.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
     if not json_files:
         print("      No Prowler output file found")
         return findings
 
     with open(json_files[0]) as f:
-        for line in f:
-            try:
-                check = json.loads(line.strip())
-            except json.JSONDecodeError:
-                continue
+        try:
+            prowler_data = json.load(f)
+        except json.JSONDecodeError:
+            print("      WARN: Could not parse Prowler output")
+            return findings
 
-            status = "pass" if check.get("StatusExtended", "").startswith("PASS") else "fail"
-            # Map Prowler check to OSCAL control via compliance mapping
-            control = None
-            compliance = check.get("Compliance", {})
-            for framework, controls in compliance.items():
-                if "800-53" in framework or "fedramp" in framework.lower():
-                    if controls:
-                        control = controls[0].lower()
-                        break
+    if not isinstance(prowler_data, list):
+        prowler_data = [prowler_data]
 
-            if not control:
-                continue
+    for check in prowler_data:
+        status = "pass" if check.get("Status", "") == "PASS" else "fail"
 
+        # Map via FedRAMP Moderate or NIST 800-53 compliance mapping
+        compliance = check.get("Compliance", {})
+        controls_mapped = []
+
+        # Prefer FedRAMP Moderate mapping
+        fedramp = compliance.get("FedRamp-Moderate-Revision-4", [])
+        if fedramp:
+            controls_mapped = [c.lower() for c in fedramp]
+        else:
+            # Fall back to NIST 800-53 Rev 5
+            nist = compliance.get("NIST-800-53-Revision-5", [])
+            if nist:
+                # Convert prowler format (ac_2_1) to OSCAL format (ac-2(1))
+                for n in nist[:3]:  # Take first 3 to avoid noise
+                    parts = n.split("_")
+                    if len(parts) >= 2:
+                        ctrl = f"{parts[0]}-{parts[1]}"
+                        if len(parts) >= 3:
+                            ctrl = f"{parts[0]}-{parts[1]}({parts[2]})"
+                        controls_mapped.append(ctrl)
+
+        if not controls_mapped:
+            continue
+
+        for control in controls_mapped:
             findings.append({
                 "source": "prowler",
                 "control": control,
