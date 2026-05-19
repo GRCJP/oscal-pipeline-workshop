@@ -1,6 +1,13 @@
+# Environment
 .env
+
 .DS_Store
-*.pyc
+
+# Python
 __pycache__/
+*.pyc
+
 oscal/
-evidence/
+
+# Prowler output (large, regenerated)
+evidence/prowler-output/

@@ -38,6 +38,13 @@ jobs:
           assert len(controls) > 0, 'No controls found'
           "
 
+      - name: Run enforcement gate
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          pip install Pillow boto3 requests
+          python scripts/enforce.py --results oscal-test/assessment-results.json --poam oscal-test/poam.json --no-issue
+
       - name: Validate Assessment Results skeleton
         run: |
           python -c "

@@ -1,0 +1,61 @@
+name: Full Pipeline Assessment
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'  # Weekly on Monday at 6am UTC
+  workflow_dispatch:       # Manual trigger for live demo
+
+jobs:
+  assess:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install openpyxl python-docx boto3 requests Pillow
+
+      - name: Stage 1 — Convert
+        run: python scripts/excel_to_oscal.py --input Templates/fedramp-moderate-template-ssp.xlsx --output oscal
+
+      - name: Stage 2 — Discover
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_ORG: ${{ github.repository_owner }}
+        run: python scripts/discover.py --ssp oscal/ssp.json --output oscal/inventory.json
+
+      - name: Stage 3 — Assess
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_ORG: ${{ github.repository_owner }}
+        run: python scripts/assess.py --ssp oscal/ssp.json --output oscal/assessment-results.json --skip-prowler --skip-trivy
+
+      - name: Stage 4 — Reconcile
+        run: python scripts/reconcile.py --ssp oscal/ssp.json --results oscal/assessment-results.json --output oscal/poam.json
+
+      - name: Stage 5 — Enforce
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python scripts/enforce.py --results oscal/assessment-results.json --poam oscal/poam.json --repo ${{ github.repository }} || true
+
+      - name: Commit updated artifacts
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add oscal/ evidence/ || true
+          git diff --staged --quiet || git commit -m "chore: update assessment artifacts [pipeline run]"
+          git push || true

@@ -1,0 +1,20 @@
+{
+  "stale_access_key": ["ac-2"],
+  "no_mfa": ["ia-2"],
+  "excessive_permissions": ["ac-6"],
+  "root_account_usage": ["ac-6(1)"],
+  "guardduty_disabled": ["si-4"],
+  "cloudtrail_not_multiregion": ["au-2", "au-3"],
+  "cloudtrail_no_log_validation": ["au-9"],
+  "config_recorder_disabled": ["cm-8"],
+  "s3_no_encryption": ["sc-28"],
+  "s3_public_access": ["sc-7"],
+  "security_hub_disabled": ["si-4", "ra-5"],
+  "access_analyzer_no_findings": ["ac-6"],
+  "branch_protection_disabled": ["cm-3"],
+  "no_required_reviews": ["cm-3", "sa-11"],
+  "no_status_checks": ["sa-10", "cm-3"],
+  "code_scanning_disabled": ["sa-11"],
+  "dependabot_disabled": ["ra-5", "si-2"],
+  "actions_no_workflow": ["sa-10"]
+}
