@@ -52,6 +52,7 @@ def main():
     parser.add_argument("--no-report", action="store_true", help="Skip HTML dashboard generation")
     parser.add_argument("--no-export-ssp", action="store_true", help="Skip updated SSP Excel export")
     parser.add_argument("--no-export-poam", action="store_true", help="Skip POA&M Excel export")
+    parser.add_argument("--no-linear", action="store_true", help="Skip Linear issue export")
     args = parser.parse_args()
 
     scripts_dir = os.path.dirname(os.path.abspath(__file__))
@@ -166,6 +167,13 @@ def main():
             "--output", os.path.join(args.output_dir, "poam-report.xlsx"),
         ])
         report_artifacts.append(f"{args.output_dir}/poam-report.xlsx")
+
+    if not args.no_linear:
+        run_stage(6, "REPORT — Linear POA&M Export", [
+            python, os.path.join(scripts_dir, "export_to_linear.py"),
+            "--poam", os.path.join(args.output_dir, "poam.json"),
+            "--results", os.path.join(args.output_dir, "assessment-results.json"),
+        ])
 
     end_time = datetime.now(timezone.utc)
     elapsed = (end_time - start_time).total_seconds()

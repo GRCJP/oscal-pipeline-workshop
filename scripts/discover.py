@@ -18,6 +18,8 @@ REQUIRES:
 import argparse
 import json
 import os
+import shutil
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -52,6 +54,57 @@ AWS_RESOURCE_TYPES = [
 ]
 
 
+# ── Local tools we look for on the system ──────────────────────────────────
+
+LOCAL_TOOLS = [
+    {"command": "prowler",   "key": "prowler",       "title": "Prowler",        "type": "security-scanner"},
+    {"command": "trivy",     "key": "trivy",          "title": "Trivy",          "type": "security-scanner"},
+    {"command": "terraform", "key": "terraform",      "title": "Terraform",      "type": "iac"},
+    {"command": "kubectl",   "key": "kubernetes",     "title": "Kubernetes",     "type": "orchestration"},
+    {"command": "docker",    "key": "docker",         "title": "Docker",         "type": "container-runtime"},
+    {"command": "gcloud",    "key": "gcp",            "title": "Google Cloud",   "type": "cloud-provider"},
+    {"command": "az",        "key": "azure",          "title": "Microsoft Azure","type": "cloud-provider"},
+    {"command": "linear",    "key": "linear",         "title": "Linear",         "type": "project-management"},
+]
+
+
+def discover_local_tools() -> list:
+    """Scan the local environment for installed compliance-relevant tools."""
+    print("\n    Scanning local environment for installed tools...")
+    resources = []
+
+    for tool in LOCAL_TOOLS:
+        path = shutil.which(tool["command"])
+        if path:
+            # Try to get version
+            version = "unknown"
+            try:
+                result = subprocess.run(
+                    [tool["command"], "--version"],
+                    capture_output=True, text=True, timeout=5,
+                )
+                out = (result.stdout or result.stderr).strip().split("\n")[0]
+                if out:
+                    version = out
+            except Exception:
+                pass
+
+            resources.append({
+                "type": f"Local::{tool['type']}",
+                "id": f"local:{tool['command']}",
+                "name": tool["title"],
+                "source": "local_environment",
+                "component_key": tool["key"],
+                "details": {"path": path, "version": version},
+            })
+            print(f"      Local::{tool['type']:30s} {tool['title']} ({version})")
+        else:
+            print(f"      Local::{tool['type']:30s} {tool['title']} — not found")
+
+    print(f"\n    Local tools discovered: {len(resources)}")
+    return resources
+
+
 def discover_aws(region: str = "us-east-1") -> list:
     """Query AWS Config for discovered resources."""
     print("\n    Querying AWS Config for resources...")
@@ -74,6 +127,57 @@ def discover_aws(region: str = "us-east-1") -> list:
                 print(f"      {r['resourceType']:40s} {r.get('resourceName', r.get('resourceId', ''))}")
         except Exception as e:
             print(f"      WARN: Could not list {resource_type}: {e}")
+
+    # Direct API checks for services AWS Config doesn't track
+    print("\n    Checking additional AWS services...")
+
+    try:
+        kms = boto3.client("kms", region_name=region)
+        keys = kms.list_keys(Limit=100).get("Keys", [])
+        if keys:
+            for k in keys:
+                desc = kms.describe_key(KeyId=k["KeyId"]).get("KeyMetadata", {})
+                if desc.get("KeyManager") == "CUSTOMER":
+                    resources.append({
+                        "type": "AWS::KMS::Key",
+                        "id": k["KeyId"],
+                        "name": f"KMS Key ({k['KeyId'][:8]}...)",
+                        "source": "aws_kms",
+                    })
+                    print(f"      AWS::KMS::Key                              {k['KeyId'][:8]}... ✓")
+    except Exception as e:
+        print(f"      WARN: Could not check KMS: {e}")
+
+    try:
+        cw = boto3.client("cloudwatch", region_name=region)
+        alarms = cw.describe_alarms(MaxRecords=1).get("MetricAlarms", [])
+        if alarms:
+            resources.append({
+                "type": "AWS::CloudWatch::Alarm",
+                "id": "cloudwatch-active",
+                "name": "AWS CloudWatch",
+                "source": "aws_cloudwatch",
+            })
+            print(f"      AWS::CloudWatch::Alarm                     active ✓")
+    except Exception as e:
+        print(f"      WARN: Could not check CloudWatch: {e}")
+
+    try:
+        ec2 = boto3.client("ec2", region_name=region)
+        flow_logs = ec2.describe_flow_logs().get("FlowLogs", [])
+        if flow_logs:
+            for fl in flow_logs:
+                resources.append({
+                    "type": "AWS::EC2::FlowLog",
+                    "id": fl.get("FlowLogId", ""),
+                    "name": f"VPC Flow Log ({fl.get('FlowLogId', '')})",
+                    "source": "aws_ec2",
+                })
+                print(f"      AWS::EC2::FlowLog                          {fl.get('FlowLogId', '')} ✓")
+        else:
+            print(f"      AWS::EC2::FlowLog                          none found")
+    except Exception as e:
+        print(f"      WARN: Could not check VPC Flow Logs: {e}")
 
     print(f"\n    AWS resources discovered: {len(resources)}")
     return resources
@@ -209,6 +313,11 @@ def detect_drift(discovered: list, ssp_components: dict) -> dict:
     """
     discovered_services = set()
     for r in discovered:
+        # Local tools and extended checks carry their own component_key
+        if "component_key" in r:
+            discovered_services.add(r["component_key"])
+            continue
+
         rtype = r.get("type", "")
         if "IAM" in rtype:
             discovered_services.add("aws iam")
@@ -224,6 +333,10 @@ def detect_drift(discovered: list, ssp_components: dict) -> dict:
             discovered_services.add("aws security groups")
         elif "VPC" in rtype:
             discovered_services.add("aws vpc")
+        elif "FlowLog" in rtype:
+            discovered_services.add("vpc flow logs")
+        elif "CloudWatch" in rtype:
+            discovered_services.add("aws cloudwatch")
         elif "EC2" in rtype:
             discovered_services.add("aws ec2")
         elif "Repository" in rtype:
@@ -317,12 +430,14 @@ def main():
     # Discover
     aws_resources = discover_aws(args.region)
     github_resources = discover_github(args.github_repo)
-    all_resources = aws_resources + github_resources
+    local_resources = discover_local_tools()
+    all_resources = aws_resources + github_resources + local_resources
 
     # Capture discovery output as screenshot
     discovery_text = f"DISCOVERY RESULTS\n{'='*50}\n"
     discovery_text += f"AWS resources:    {len(aws_resources)}\n"
     discovery_text += f"GitHub resources: {len(github_resources)}\n"
+    discovery_text += f"Local tools:      {len(local_resources)}\n"
     discovery_text += f"Total discovered: {len(all_resources)}\n\n"
     for r in all_resources:
         discovery_text += f"  {r['type']:40s} {r['name']}\n"
@@ -346,6 +461,7 @@ def main():
     print(f"  Resources discovered:  {len(all_resources)}")
     print(f"    AWS:                 {len(aws_resources)}")
     print(f"    GitHub:              {len(github_resources)}")
+    print(f"    Local tools:         {len(local_resources)}")
     print(f"  SSP components:        {len(ssp_components)}")
     print(f"{'─'*62}")
     print(f"  DRIFT DETECTION")

@@ -12,6 +12,13 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+# Load .env from project root so all pipeline scripts pick up credentials
+try:
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+except ImportError:
+    pass
+
 # ── UUID v5 deterministic identifiers ─────────────────────────────────────────
 OSCAL_NAMESPACE = uuid.UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
 
