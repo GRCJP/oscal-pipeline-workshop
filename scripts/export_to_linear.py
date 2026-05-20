@@ -199,7 +199,41 @@ def build_screenshot_map(ar_path: str) -> dict:
     return screenshot_map
 
 
-def create_issue(api_key: str, team_id: str, title: str, description: str, priority: int) -> dict | None:
+def resolve_todo_state(api_key: str, team_id: str) -> str | None:
+    """Find the 'Todo' state ID for a team."""
+    query = """
+    query($teamId: String!) {
+      team(id: $teamId) {
+        states { nodes { id name type } }
+      }
+    }
+    """
+    data = linear_request(api_key, query, {"teamId": team_id})
+    nodes = data.get("data", {}).get("team", {}).get("states", {}).get("nodes", [])
+    for n in nodes:
+        if n["name"].lower() == "todo":
+            return n["id"]
+    return None
+
+
+def resolve_assignee(api_key: str, name: str) -> str | None:
+    """Find a user ID by display name search."""
+    query = """
+    query {
+      users { nodes { id name displayName } }
+    }
+    """
+    data = linear_request(api_key, query)
+    nodes = data.get("data", {}).get("users", {}).get("nodes", [])
+    name_lower = name.lower()
+    for n in nodes:
+        if name_lower in n.get("name", "").lower() or name_lower in n.get("displayName", "").lower():
+            return n["id"]
+    return None
+
+
+def create_issue(api_key: str, team_id: str, title: str, description: str,
+                 priority: int, state_id: str = None, assignee_id: str = None) -> dict | None:
     """Create a Linear issue and return the issue data, or None on failure."""
     mutation = """
     mutation IssueCreate($input: IssueCreateInput!) {
@@ -221,6 +255,10 @@ def create_issue(api_key: str, team_id: str, title: str, description: str, prior
             "priority": priority,
         }
     }
+    if state_id:
+        variables["input"]["stateId"] = state_id
+    if assignee_id:
+        variables["input"]["assigneeId"] = assignee_id
     data = linear_request(api_key, mutation, variables)
     result = data.get("data", {}).get("issueCreate", {})
     if result.get("success"):
@@ -257,6 +295,20 @@ def export_to_linear(poam_path: str, team_key: str, api_key: str,
     print(f"  Team ID           : {team_id}")
     print()
 
+    # Resolve Todo state for POA&M items
+    todo_state_id = resolve_todo_state(api_key, team_id)
+    if todo_state_id:
+        print(f"  Issue state       : Todo")
+
+    # Resolve default assignee from POAM_ASSIGNEE env var
+    assignee_name = os.environ.get("POAM_ASSIGNEE", "")
+    assignee_id = None
+    if assignee_name:
+        assignee_id = resolve_assignee(api_key, assignee_name)
+        if assignee_id:
+            print(f"  Assignee          : {assignee_name}")
+    print()
+
     # Upload cache — avoid uploading the same screenshot multiple times
     upload_cache = {}
 
@@ -285,7 +337,8 @@ def export_to_linear(poam_path: str, team_key: str, api_key: str,
         priority = get_priority(control_id)
 
         try:
-            issue = create_issue(api_key, team_id, title, description, priority)
+            issue = create_issue(api_key, team_id, title, description, priority,
+                                state_id=todo_state_id, assignee_id=assignee_id)
             if issue:
                 ss_indicator = " 📎" if screenshot_url else ""
                 print(f"  Created: {issue['identifier']}  {issue['url']}{ss_indicator}")
