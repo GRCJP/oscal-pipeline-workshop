@@ -19,7 +19,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(__file__))
 from pipeline_utils import (
     stable_uuid, now_iso, now_filesafe, load_oscal, save_oscal,
-    capture_screenshot, make_poam_item,
+    capture_screenshot, make_poam_item, oscal_roles_and_parties,
 )
 
 
@@ -226,6 +226,7 @@ def main():
                 "last-modified": now_iso(),
                 "version": "1.0.0",
                 "oscal-version": "1.1.2",
+                **oscal_roles_and_parties(),
             },
             "import-ssp": {"href": "ssp.json"},
             "poam-items": poam_items,

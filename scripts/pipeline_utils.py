@@ -192,10 +192,50 @@ def make_poam_item(item_uuid_name: str, title: str, description: str,
         "uuid": stable_uuid(item_uuid_name),
         "title": title,
         "description": description,
+        "origins": [{
+            "actors": [{
+                "type": "tool",
+                "actor-uuid": stable_uuid(f"tool:{source}"),
+            }]
+        }],
         "props": [
             {"name": "control-id", "value": control_id},
             {"name": "source", "value": source},
             {"name": "status", "value": "open"},
             {"name": "created", "value": now_iso()},
+        ],
+    }
+
+
+def oscal_roles_and_parties():
+    """Return standard OSCAL roles and parties required by the schema."""
+    return {
+        "roles": [
+            {"id": "system-owner", "title": "System Owner"},
+            {"id": "authorizing-official", "title": "Authorizing Official"},
+            {"id": "assessor", "title": "Assessor"},
+            {"id": "system-admin", "title": "System Administrator"},
+        ],
+        "parties": [
+            {
+                "uuid": stable_uuid("party:grc-engineering-club"),
+                "type": "organization",
+                "name": "GRC Engineering Club",
+            },
+            {
+                "uuid": stable_uuid("party:workshop-participant"),
+                "type": "person",
+                "name": "Workshop Participant",
+            },
+        ],
+        "responsible-parties": [
+            {
+                "role-id": "system-owner",
+                "party-uuids": [stable_uuid("party:workshop-participant")],
+            },
+            {
+                "role-id": "assessor",
+                "party-uuids": [stable_uuid("party:workshop-participant")],
+            },
         ],
     }

@@ -2,7 +2,7 @@
   "inspector": "aws-sec-inspector",
   "account_id": "567947664730",
   "region": "us-east-1",
-  "timestamp": "2026-05-20T16:28:21Z",
+  "timestamp": "2026-05-20T22:34:33Z",
   "summary": {
     "total": 12,
     "pass": 4,

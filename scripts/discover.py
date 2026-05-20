@@ -454,6 +454,23 @@ def main():
     inventory = build_inventory(all_resources, drift)
     save_oscal(inventory, args.output)
 
+    # Fold inventory into SSP as inventory-items (OSCAL-compliant location)
+    inventory_items = []
+    for r in all_resources:
+        inventory_items.append({
+            "uuid": stable_uuid(f"inventory-item:{r['type']}:{r['id']}"),
+            "description": f"{r['type']}: {r['name']}",
+            "props": [
+                {"name": "asset-type", "value": r["type"]},
+                {"name": "source", "value": r["source"]},
+                {"name": "resource-id", "value": r["id"]},
+                {"name": "discovered-at", "value": now_iso()},
+            ],
+        })
+    ssp["system-security-plan"]["system-implementation"]["inventory-items"] = inventory_items
+    save_oscal(ssp, args.ssp)
+    print(f"    Updated SSP with {len(inventory_items)} inventory-items")
+
     # Summary
     print(f"\n{'='*62}")
     print(f"  DISCOVERY COMPLETE")
