@@ -175,6 +175,13 @@ def main():
             "--results", os.path.join(args.output_dir, "assessment-results.json"),
         ])
 
+    # Stage 7: Validate & Package
+    run_stage(7, "VALIDATE — OSCAL Schema Compliance", [
+        python, os.path.join(scripts_dir, "validate.py"),
+        "--dir", args.output_dir,
+        "--submission", "submission",
+    ])
+
     end_time = datetime.now(timezone.utc)
     elapsed = (end_time - start_time).total_seconds()
 
@@ -189,6 +196,7 @@ def main():
     for a in report_artifacts:
         print(f"    {a}")
     print(f"    {args.evidence_dir}/screenshots/")
+    print(f"    submission/ (assessor package)")
     print(f"{'═'*62}\n")
 
 

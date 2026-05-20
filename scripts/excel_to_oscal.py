@@ -114,6 +114,7 @@ def build_by_components_from_narrative(narrative: str) -> tuple:
         comp = KNOWN_COMPONENTS[key]
         by_components.append({
             "component-uuid": stable_uuid(f"component:{key}"),
+            "uuid": stable_uuid(f"by-component:{key}:{narrative[:30]}"),
             "description": comp["title"],
             "implementation-status": {
                 "state": "planned",
@@ -149,6 +150,7 @@ def build_component_definitions(discovered_keys: set):
             "uuid": stable_uuid(f"component:{key}"),
             "type": comp["type"],
             "title": comp["title"],
+            "description": f"{comp['title']} — referenced in SSP control narratives.",
             "props": [
                 {"name": "component-key", "value": key},
                 {"name": "origin",        "value": "ssp-narrative"},
@@ -187,8 +189,7 @@ def build_assessment_results_skeleton(ssp_uuid: str):
                             {"include-all": {}}
                         ]
                     },
-                    "observations": [],
-                    "findings": [],
+                    "remarks": "Skeleton — populated by assess.py pipeline stage."
                 }
             ]
         }
@@ -211,7 +212,13 @@ def build_poam_skeleton(ssp_uuid: str):
             "import-ssp": {
                 "href": "ssp.json"
             },
-            "poam-items": []
+            "poam-items": [
+                {
+                    "uuid": stable_uuid("poam-item:placeholder"),
+                    "title": "Placeholder — pending assessment",
+                    "description": "This POA&M will be populated after the assessment and reconciliation stages run.",
+                }
+            ]
         }
     }
 
@@ -300,18 +307,20 @@ def convert_excel_to_oscal(input_path: str, output_dir: str):
             props.append({"name": "baseline-narrative", "value": ssp_text})
 
         # Build the implemented-requirement
+        statement = {
+            "statement-id": f"{control_id}_smt",
+            "uuid": stable_uuid(f"stmt:{control_id}"),
+        }
+        if ssp_text:
+            statement["remarks"] = ssp_text
+        if by_components:
+            statement["by-components"] = by_components
+
         impl_req = {
             "uuid": stable_uuid(f"impl-req:{control_id}"),
             "control-id": control_id,
             "props": props,
-            "statements": [
-                {
-                    "statement-id": f"{control_id}_smt",
-                    "uuid": stable_uuid(f"stmt:{control_id}"),
-                    "description": ssp_text or "Implementation statement not yet documented.",
-                    "by-components": by_components,
-                }
-            ]
+            "statements": [statement],
         }
         implemented_requirements.append(impl_req)
 
