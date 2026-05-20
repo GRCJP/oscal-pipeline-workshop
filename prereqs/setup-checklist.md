@@ -29,7 +29,7 @@ python3 --version
 
 **Install required packages:**
 ```bash
-pip3 install openpyxl python-docx
+pip3 install openpyxl python-docx python-dotenv boto3 pillow requests
 ```
 
 ---
@@ -140,7 +140,20 @@ trivy --version
 
 ---
 
-## 7. Configure Your Environment
+## 7. Linear API Key (POA&M Issue Tracking)
+
+Linear is used to create trackable issues from pipeline findings, each with evidence screenshots attached.
+
+1. Go to https://linear.app/settings/api
+2. Click **Create key**
+3. Copy the API key — you'll need it for `.env`
+
+**Find your team key:**
+Your team key is the short prefix on issues (e.g., `GRC` if issues are `GRC-1`, `GRC-2`). Check it under **Settings > Teams**.
+
+---
+
+## 8. Configure Your Environment
 
 1. Copy the example environment file:
 ```bash
@@ -161,7 +174,7 @@ export $(cat .env | grep -v '^#' | xargs)
 
 ---
 
-## 8. Verify Everything Works
+## 9. Verify Everything Works
 
 Run the converter to confirm your setup:
 
@@ -171,16 +184,27 @@ python3 scripts/excel_to_oscal.py --input Templates/fedramp-moderate-template-ss
 
 You should see **57 controls** processed and **CONVERSION COMPLETE**.
 
+**Run the full pipeline** (all 6 stages end-to-end):
+
+```bash
+python3 scripts/run_pipeline.py --github-repo oscal-pipeline-workshop
+```
+
+This runs: Convert, Discover, Assess, Reconcile, Enforce, and Report (including Linear export with evidence screenshots).
+
 ---
 
 ## Tool Summary
 
 | Tool | Purpose | Cost | Install |
 |------|---------|------|---------|
-| Python 3 | Run converter scripts | Free | `brew install python3` |
+| Python 3 | Run pipeline scripts | Free | `brew install python3` |
+| boto3 | AWS SDK for Python | Free | `pip3 install boto3` |
+| python-dotenv | Load .env credentials automatically | Free | `pip3 install python-dotenv` |
 | AWS CLI | Query AWS APIs | Free tier | `brew install awscli` |
 | AWS Config | Asset discovery & inventory | Free tier | AWS Console |
 | GitHub + Token | Source control evidence | Free | github.com/settings/tokens |
+| Linear | POA&M issue tracking with evidence | Free | linear.app/settings/api |
 | Prowler | Cloud security posture checks | Free (OSS) | `pip3 install prowler` |
 | Trivy | Container/IaC/dependency scanning | Free (OSS) | `brew install trivy` |
 | NVD API | Vulnerability intelligence | Free (public) | No install needed |
@@ -201,6 +225,9 @@ Check that your IAM user has `ReadOnlyAccess` policy attached.
 
 **GitHub token not working**
 Make sure you selected `repo` and `read:org` scopes when creating the token.
+
+**Linear issues not creating**
+Check that `LINEAR_API_KEY` and `LINEAR_TEAM_KEY` are set in `.env`. The team key is the short prefix on your issues (e.g., `GRC`).
 
 ---
 
