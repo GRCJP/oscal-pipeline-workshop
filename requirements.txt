@@ -1,7 +1,6 @@
 openpyxl
 python-docx
+python-dotenv
 boto3
-requests==2.25.0
 Pillow
-urllib3==1.26.5
-Jinja2==3.1.2
+requests
