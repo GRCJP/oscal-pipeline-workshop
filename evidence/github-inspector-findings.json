@@ -1,0 +1,52 @@
+{
+  "inspector": "github-sec-inspector",
+  "org": "GRCJP",
+  "repo": "oscal-pipeline-workshop",
+  "timestamp": "2026-05-20T15:30:56Z",
+  "summary": {
+    "total": 3,
+    "pass": 1,
+    "fail": 2
+  },
+  "findings": [
+    {
+      "type": "branch_protection_disabled",
+      "title": "No branch protection: oscal-pipeline-workshop/main",
+      "description": "Repository has no branch protection rules on the default branch",
+      "status": "fail",
+      "control_mappings": {
+        "fedramp": [
+          "cm-3"
+        ]
+      },
+      "resource": "GRCJP/oscal-pipeline-workshop",
+      "severity": "high"
+    },
+    {
+      "type": "no_open_secret_alerts",
+      "title": "No open secret alerts: oscal-pipeline-workshop",
+      "description": "No open secret scanning alerts found",
+      "status": "pass",
+      "control_mappings": {
+        "fedramp": [
+          "ia-5"
+        ]
+      },
+      "resource": "GRCJP/oscal-pipeline-workshop",
+      "severity": "medium"
+    },
+    {
+      "type": "actions_unrestricted",
+      "title": "All Actions allowed: oscal-pipeline-workshop",
+      "description": "Repository allows all GitHub Actions without restriction",
+      "status": "fail",
+      "control_mappings": {
+        "fedramp": [
+          "cm-7"
+        ]
+      },
+      "resource": "GRCJP/oscal-pipeline-workshop",
+      "severity": "medium"
+    }
+  ]
+}

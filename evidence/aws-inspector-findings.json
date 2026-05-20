@@ -1,0 +1,169 @@
+{
+  "inspector": "aws-sec-inspector",
+  "account_id": "567947664730",
+  "region": "us-east-1",
+  "timestamp": "2026-05-20T15:30:54Z",
+  "summary": {
+    "total": 12,
+    "pass": 4,
+    "fail": 8
+  },
+  "findings": [
+    {
+      "type": "root_account_usage",
+      "title": "Root account has no access keys",
+      "description": "The root account does not have active access keys.",
+      "status": "pass",
+      "control_mappings": {
+        "fedramp": [
+          "ac-6(1)"
+        ]
+      },
+      "severity": "medium"
+    },
+    {
+      "type": "no_mfa",
+      "title": "MFA enabled: demo-compliant",
+      "description": "IAM user 'demo-compliant' has MFA enabled.",
+      "status": "pass",
+      "control_mappings": {
+        "fedramp": [
+          "ia-2",
+          "ia-2(1)"
+        ]
+      },
+      "severity": "medium",
+      "resource": "arn:aws:iam::567947664730:user/demo-compliant"
+    },
+    {
+      "type": "no_mfa",
+      "title": "No MFA: demo-no-mfa",
+      "description": "IAM user 'demo-no-mfa' has no MFA device enabled.",
+      "status": "fail",
+      "control_mappings": {
+        "fedramp": [
+          "ia-2",
+          "ia-2(1)"
+        ]
+      },
+      "severity": "high",
+      "resource": "arn:aws:iam::567947664730:user/demo-no-mfa"
+    },
+    {
+      "type": "no_mfa",
+      "title": "No MFA: demo-stale-key",
+      "description": "IAM user 'demo-stale-key' has no MFA device enabled.",
+      "status": "fail",
+      "control_mappings": {
+        "fedramp": [
+          "ia-2",
+          "ia-2(1)"
+        ]
+      },
+      "severity": "high",
+      "resource": "arn:aws:iam::567947664730:user/demo-stale-key"
+    },
+    {
+      "type": "no_mfa",
+      "title": "No MFA: svc-pipeline",
+      "description": "IAM user 'svc-pipeline' has no MFA device enabled.",
+      "status": "fail",
+      "control_mappings": {
+        "fedramp": [
+          "ia-2",
+          "ia-2(1)"
+        ]
+      },
+      "severity": "high",
+      "resource": "arn:aws:iam::567947664730:user/svc-pipeline"
+    },
+    {
+      "type": "no_mfa",
+      "title": "MFA enabled: workshop-admin",
+      "description": "IAM user 'workshop-admin' has MFA enabled.",
+      "status": "pass",
+      "control_mappings": {
+        "fedramp": [
+          "ia-2",
+          "ia-2(1)"
+        ]
+      },
+      "severity": "medium",
+      "resource": "arn:aws:iam::567947664730:user/workshop-admin"
+    },
+    {
+      "type": "excessive_permissions",
+      "title": "No wildcard policies found",
+      "description": "No customer-managed policies grant Action:* on Resource:*.",
+      "status": "pass",
+      "control_mappings": {
+        "fedramp": [
+          "ac-6"
+        ]
+      },
+      "severity": "medium"
+    },
+    {
+      "type": "access_analyzer_no_findings",
+      "title": "No Access Analyzer configured",
+      "description": "IAM Access Analyzer is not enabled in this region.",
+      "status": "fail",
+      "control_mappings": {
+        "fedramp": [
+          "ac-6"
+        ]
+      },
+      "severity": "medium"
+    },
+    {
+      "type": "guardduty_disabled",
+      "title": "GuardDuty not enabled",
+      "description": "Amazon GuardDuty is not enabled in this region.",
+      "status": "fail",
+      "control_mappings": {
+        "fedramp": [
+          "si-4"
+        ]
+      },
+      "severity": "high"
+    },
+    {
+      "type": "security_hub_disabled",
+      "title": "Security Hub not enabled",
+      "description": "AWS Security Hub is not enabled in this region.",
+      "status": "fail",
+      "control_mappings": {
+        "fedramp": [
+          "si-4",
+          "ra-5"
+        ]
+      },
+      "severity": "high"
+    },
+    {
+      "type": "s3_public_access",
+      "title": "No account-level S3 public access block",
+      "description": "Account-level S3 Block Public Access is not configured.",
+      "status": "fail",
+      "control_mappings": {
+        "fedramp": [
+          "ac-3",
+          "sc-7"
+        ]
+      },
+      "severity": "high"
+    },
+    {
+      "type": "cloudtrail_not_org_trail",
+      "title": "No organization trail",
+      "description": "No CloudTrail trails are organization trails. Trails found: workshop-audit-trail.",
+      "status": "fail",
+      "control_mappings": {
+        "fedramp": [
+          "au-2"
+        ]
+      },
+      "severity": "medium"
+    }
+  ]
+}
