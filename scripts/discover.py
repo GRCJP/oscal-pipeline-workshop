@@ -64,7 +64,20 @@ LOCAL_TOOLS = [
     {"command": "docker",    "key": "docker",         "title": "Docker",         "type": "container-runtime"},
     {"command": "gcloud",    "key": "gcp",            "title": "Google Cloud",   "type": "cloud-provider"},
     {"command": "az",        "key": "azure",          "title": "Microsoft Azure","type": "cloud-provider"},
-    {"command": "linear",    "key": "linear",         "title": "Linear",         "type": "project-management"},
+]
+
+# Tools detected via alternative methods (not just PATH lookup)
+PYTHON_MODULE_TOOLS = [
+    {"module": "prowler", "key": "prowler", "title": "Prowler", "type": "security-scanner",
+     "version_cmd": [sys.executable, "-m", "prowler", "--version"]},
+]
+
+ENV_VAR_TOOLS = [
+    {"env_var": "LINEAR_API_KEY", "key": "linear", "title": "Linear", "type": "project-management"},
+]
+
+REPO_FILE_TOOLS = [
+    {"glob": "terraform/*.tf", "key": "terraform", "title": "Terraform (IaC)", "type": "iac"},
 ]
 
 
@@ -73,10 +86,10 @@ def discover_local_tools() -> list:
     print("\n    Scanning local environment for installed tools...")
     resources = []
 
+    # Check PATH-based tools
     for tool in LOCAL_TOOLS:
         path = shutil.which(tool["command"])
         if path:
-            # Try to get version
             version = "unknown"
             try:
                 result = subprocess.run(
@@ -100,6 +113,66 @@ def discover_local_tools() -> list:
             print(f"      Local::{tool['type']:30s} {tool['title']} ({version})")
         else:
             print(f"      Local::{tool['type']:30s} {tool['title']} — not found")
+
+    # Check Python module tools (e.g., prowler installed via pip)
+    for tool in PYTHON_MODULE_TOOLS:
+        # Skip if already found via PATH
+        if any(r["component_key"] == tool["key"] for r in resources):
+            continue
+        try:
+            result = subprocess.run(
+                tool["version_cmd"], capture_output=True, text=True, timeout=10,
+            )
+            if result.returncode == 0 or result.stdout or result.stderr:
+                version = (result.stdout or result.stderr).strip().split("\n")[0] or "installed"
+                resources.append({
+                    "type": f"Local::{tool['type']}",
+                    "id": f"local:{tool['module']}",
+                    "name": tool["title"],
+                    "source": "local_environment",
+                    "component_key": tool["key"],
+                    "details": {"method": "python-module", "version": version},
+                })
+                print(f"      Local::{tool['type']:30s} {tool['title']} (module: {version})")
+        except Exception:
+            pass
+
+    # Check env var tools (e.g., Linear API key)
+    for tool in ENV_VAR_TOOLS:
+        val = os.environ.get(tool["env_var"], "")
+        if val:
+            resources.append({
+                "type": f"Local::{tool['type']}",
+                "id": f"local:{tool['key']}",
+                "name": tool["title"],
+                "source": "local_environment",
+                "component_key": tool["key"],
+                "details": {"method": "env-var", "env_var": tool["env_var"]},
+            })
+            print(f"      Local::{tool['type']:30s} {tool['title']} (API key configured)")
+        else:
+            print(f"      Local::{tool['type']:30s} {tool['title']} — no API key set")
+
+    # Check repo file tools (e.g., terraform .tf files in repo)
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    for tool in REPO_FILE_TOOLS:
+        # Skip if already found via PATH
+        if any(r["component_key"] == tool["key"] for r in resources):
+            continue
+        from glob import glob
+        matches = glob(os.path.join(repo_root, tool["glob"]))
+        if matches:
+            resources.append({
+                "type": f"Local::{tool['type']}",
+                "id": f"local:{tool['key']}",
+                "name": tool["title"],
+                "source": "local_environment",
+                "component_key": tool["key"],
+                "details": {"method": "repo-files", "files": len(matches)},
+            })
+            print(f"      Local::{tool['type']:30s} {tool['title']} ({len(matches)} files in repo)")
+        else:
+            print(f"      Local::{tool['type']:30s} {tool['title']} — no files found")
 
     print(f"\n    Local tools discovered: {len(resources)}")
     return resources
