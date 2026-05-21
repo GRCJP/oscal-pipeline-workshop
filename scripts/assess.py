@@ -116,6 +116,7 @@ def check_s3(region: str) -> list:
     """Check S3 buckets for encryption and public access."""
     print("\n    [S3] Checking buckets for encryption and public access...")
     findings = []
+    raw_evidence = []
     s3 = boto3.client("s3", region_name=region)
 
     buckets = s3.list_buckets()["Buckets"]
@@ -124,9 +125,12 @@ def check_s3(region: str) -> list:
         if not name.startswith("workshop-"):
             continue
 
+        bucket_evidence = {"bucket": name}
+
         # Encryption
         try:
-            s3.get_bucket_encryption(Bucket=name)
+            enc = s3.get_bucket_encryption(Bucket=name)
+            bucket_evidence["encryption"] = enc["ServerSideEncryptionConfiguration"]
             findings.append({
                 "source": "aws_s3", "control": "sc-28",
                 "status": "pass", "title": f"Encrypted: {name}",
@@ -135,6 +139,7 @@ def check_s3(region: str) -> list:
             print(f"      {name}: encrypted ✓")
         except s3.exceptions.ClientError as e:
             if "ServerSideEncryptionConfigurationNotFoundError" in str(e):
+                bucket_evidence["encryption"] = None
                 findings.append({
                     "source": "aws_s3", "control": "sc-28",
                     "status": "fail", "title": f"No encryption: {name}",
@@ -145,6 +150,7 @@ def check_s3(region: str) -> list:
         # Public access block
         try:
             pab = s3.get_public_access_block(Bucket=name)["PublicAccessBlockConfiguration"]
+            bucket_evidence["public_access_block"] = pab
             all_blocked = all([
                 pab.get("BlockPublicAcls", False),
                 pab.get("IgnorePublicAcls", False),
@@ -166,12 +172,39 @@ def check_s3(region: str) -> list:
                 })
                 print(f"      {name}: partial public block ✗")
         except s3.exceptions.ClientError:
+            bucket_evidence["public_access_block"] = None
             findings.append({
                 "source": "aws_s3", "control": "sc-7",
                 "status": "fail", "title": f"No public access block: {name}",
                 "description": f"S3 bucket '{name}' has no public access block configuration.",
             })
             print(f"      {name}: no public access block ✗")
+
+        raw_evidence.append(bucket_evidence)
+
+    # Save raw evidence and capture screenshot of sample
+    evidence_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "evidence")
+    os.makedirs(evidence_dir, exist_ok=True)
+    raw_path = os.path.join(evidence_dir, "s3-raw-evidence.json")
+    with open(raw_path, "w") as f:
+        json.dump(raw_evidence, f, indent=2, default=str)
+
+    # Capture a screenshot showing raw API data for one bucket (sample evidence)
+    if raw_evidence:
+        sample = raw_evidence[0]
+        screenshot_text = f"RAW EVIDENCE SAMPLE — S3 Bucket: {sample['bucket']}\n{'='*60}\n\n"
+        screenshot_text += f"API: s3.get_bucket_encryption(Bucket='{sample['bucket']}')\n"
+        screenshot_text += f"Response:\n{json.dumps(sample.get('encryption'), indent=2, default=str)}\n\n"
+        screenshot_text += f"API: s3.get_public_access_block(Bucket='{sample['bucket']}')\n"
+        screenshot_text += f"Response:\n{json.dumps(sample.get('public_access_block'), indent=2, default=str)}\n\n"
+        screenshot_text += f"VERDICT: This is the actual API response from AWS.\n"
+        screenshot_text += f"The pipeline reads these values to determine pass/fail.\n"
+        screenshot_text += f"No screenshots, no manual checks — raw data from the source."
+        ss_dir = os.path.join(evidence_dir, "screenshots")
+        os.makedirs(ss_dir, exist_ok=True)
+        capture_screenshot(screenshot_text, os.path.join(ss_dir, f"s3-raw-evidence-sample.png"))
+        print(f"\n    [S3] Raw evidence saved: {raw_path}")
+        print(f"    [S3] Evidence screenshot: evidence/screenshots/s3-raw-evidence-sample.png")
 
     return findings
 
